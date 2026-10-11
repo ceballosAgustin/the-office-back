@@ -8,6 +8,8 @@ import com.aceballos.the_office_back.entity.Order;
 import com.aceballos.the_office_back.entity.OrderItem;
 import com.aceballos.the_office_back.entity.OrderStatus;
 import com.aceballos.the_office_back.entity.ProductVariant;
+import com.aceballos.the_office_back.exception.BusinessRuleException;
+import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.OrderRepository;
 import com.aceballos.the_office_back.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
@@ -60,16 +62,18 @@ public class OrderService {
 
         for (OrderItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findById(itemReq.getVariantId())
-                    .orElseThrow(() -> new IllegalArgumentException("Variante no encontrada con ID: " + itemReq.getVariantId()));
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Variante no encontrada con ID: " + itemReq.getVariantId()));
 
             // Validar que el producto padre esté activo
             if (!Boolean.TRUE.equals(variant.getProduct().getIsActive())) {
-                throw new IllegalStateException("El producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+                throw new BusinessRuleException(
+                        "El producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
             }
 
             // Validar stock disponible
             if (variant.getStock() < itemReq.getQuantity()) {
-                throw new IllegalStateException("Stock insuficiente para el producto '" +
+                throw new BusinessRuleException("Stock insuficiente para el producto '" +
                         variant.getProduct().getTitle() + "' en talle '" + variant.getSize() +
                         "'. Stock actual: " + variant.getStock() + ", solicitado: " + itemReq.getQuantity());
             }
@@ -96,7 +100,8 @@ public class OrderService {
         order.setItems(orderItems);
 
         Order savedOrder = orderRepository.save(order);
-        log.info("Orden creada con éxito: {} por un total de {}", savedOrder.getOrderNumber(), savedOrder.getTotalAmount());
+        log.info("Orden creada con éxito: {} por un total de {}", savedOrder.getOrderNumber(),
+                savedOrder.getTotalAmount());
 
         return mapToResponse(savedOrder);
     }
@@ -109,7 +114,7 @@ public class OrderService {
     @Transactional
     public OrderResponse updateOrderStatus(Long orderId, OrderStatus newStatus) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new IllegalArgumentException("Orden no encontrada con ID: " + orderId));
+                .orElseThrow(() -> new ResourceNotFoundException("Orden no encontrada con ID: " + orderId));
 
         OrderStatus currentStatus = order.getStatus();
 
@@ -117,7 +122,8 @@ public class OrderService {
             return mapToResponse(order);
         }
 
-        // Si se cancela una orden que estaba activa, se restaura el stock de cada variante
+        // Si se cancela una orden que estaba activa, se restaura el stock de cada
+        // variante
         if (newStatus == OrderStatus.CANCELLED && currentStatus != OrderStatus.CANCELLED) {
             for (OrderItem item : order.getItems()) {
                 ProductVariant variant = item.getProductVariant();
@@ -127,13 +133,16 @@ public class OrderService {
             log.info("Stock restaurado para la orden cancelada: {}", order.getOrderNumber());
         }
 
-        // Si una orden cancelada se vuelve a activar/completar, se valida y descuenta nuevamente
-        if (currentStatus == OrderStatus.CANCELLED && (newStatus == OrderStatus.PENDING || newStatus == OrderStatus.COMPLETED)) {
+        // Si una orden cancelada se vuelve a activar/completar, se valida y descuenta
+        // nuevamente
+        if (currentStatus == OrderStatus.CANCELLED
+                && (newStatus == OrderStatus.PENDING || newStatus == OrderStatus.COMPLETED)) {
             for (OrderItem item : order.getItems()) {
                 ProductVariant variant = item.getProductVariant();
                 if (variant.getStock() < item.getQuantity()) {
-                    throw new IllegalStateException("No es posible reactivar la orden: Stock insuficiente en " +
-                            variant.getProduct().getTitle() + " talle " + variant.getSize());
+                    throw new BusinessRuleException(
+                            "No es posible reactivar la orden: Stock insuficiente en " +
+                                    variant.getProduct().getTitle() + " talle " + variant.getSize());
                 }
                 variant.setStock(variant.getStock() - item.getQuantity());
                 productVariantRepository.save(variant);
@@ -174,7 +183,8 @@ public class OrderService {
     @Transactional(readOnly = true)
     public OrderResponse getOrderById(Long id) {
         Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Orden no encontrada con ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Orden no encontrada con ID: " + id));
         return mapToResponse(order);
     }
 
@@ -184,7 +194,8 @@ public class OrderService {
     @Transactional(readOnly = true)
     public OrderResponse getOrderByOrderNumber(String orderNumber) {
         Order order = orderRepository.findByOrderNumber(orderNumber)
-                .orElseThrow(() -> new IllegalArgumentException("Orden no encontrada con número: " + orderNumber));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Orden no encontrada con número: " + orderNumber));
         return mapToResponse(order);
     }
 

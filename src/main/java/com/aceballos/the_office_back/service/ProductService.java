@@ -6,6 +6,7 @@ import com.aceballos.the_office_back.dto.VariantDTO;
 import com.aceballos.the_office_back.entity.Product;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.repository.ProductRepository;
+import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -106,7 +107,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProductById(Long id) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Producto no encontrado con el ID: " + id));
+                    .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
         return mapToResponse(product);
     }
 
@@ -132,7 +133,7 @@ public class ProductService {
     @Transactional
     public ProductResponse updateProduct(Long id, ProductRequest request, MultipartFile file) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Producto no encontrado con el ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
 
         product.setTitle(request.getTitle());
         product.setDescription(request.getDescription());
@@ -169,7 +170,7 @@ public class ProductService {
     @Transactional
     public void deleteProduct(Long id) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Producto no encontrado con el ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
         product.setIsActive(false);
         productRepository.save(product);
     }
