@@ -34,11 +34,17 @@ public class Product {
     @Column(name = "base_stock", nullable = false)
     private Integer baseStock = 0;
 
-    @Column(name = "image_url", length = 500)
-    private String imageUrl;
-
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private Category category;
+
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ProductImage> images = new ArrayList<>();
 
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

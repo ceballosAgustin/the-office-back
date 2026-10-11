@@ -11,9 +11,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Page<Product> findByIsActiveTrue(Pageable pageable);
 
+    Page<Product> findByIsActiveTrueAndCategoryId(Long categoryId, Pageable pageable);
+
     /**
      * Búsqueda por coincidencia de título para la barra de búsqueda del e-commerce
      * ignorando mayúsculas/minúsculas y filtrando solo productos activos.
      */
     Page<Product> findByTitleContainingIgnoreCaseAndIsActiveTrue(String title, Pageable pageable);
+
+    Page<Product> findByTitleContainingIgnoreCaseAndIsActiveTrueAndCategoryId(String title, Long categoryId, Pageable pageable);
 }

@@ -1,12 +1,16 @@
 package com.aceballos.the_office_back.service;
 
+import com.aceballos.the_office_back.dto.ProductImageResponse;
 import com.aceballos.the_office_back.dto.ProductRequest;
 import com.aceballos.the_office_back.dto.ProductResponse;
 import com.aceballos.the_office_back.dto.VariantDTO;
+import com.aceballos.the_office_back.entity.Category;
 import com.aceballos.the_office_back.entity.Product;
+import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
-import com.aceballos.the_office_back.repository.ProductRepository;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
+import com.aceballos.the_office_back.repository.CategoryRepository;
+import com.aceballos.the_office_back.repository.ProductRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -27,14 +31,15 @@ import java.util.stream.Collectors;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final CategoryRepository categoryRepository;
     private final CloudinaryService cloudinaryService;
     private final ObjectMapper objectMapper;
 
     /**
-     * Crea un producto recibiendo el JSON serializado como String y el archivo de imagen.
+     * Crea un producto recibiendo el JSON serializado como String y una lista de archivos de imagen.
      */
     @Transactional
-    public ProductResponse createProduct(String productJson, MultipartFile file) {
+    public ProductResponse createProduct(String productJson, List<MultipartFile> files) {
         ProductRequest request;
         try {
             request = objectMapper.readValue(productJson, ProductRequest.class);
@@ -43,27 +48,51 @@ public class ProductService {
             throw new IllegalArgumentException("El formato del JSON del producto es inválido", e);
         }
 
-        return createProduct(request, file);
+        return createProduct(request, files);
     }
 
     /**
-     * Sobrecarga directa con ProductRequest ya tipado y el archivo de imagen opcional.
+     * Sobrecarga directa con ProductRequest y lista de imágenes.
      */
     @Transactional
-    public ProductResponse createProduct(ProductRequest request, MultipartFile file) {
-        String imageUrl = null;
-        if (file != null && !file.isEmpty()) {
-            imageUrl = cloudinaryService.uploadImage(file);
-        }
-
+    public ProductResponse createProduct(ProductRequest request, List<MultipartFile> files) {
         Product product = new Product();
         product.setTitle(request.getTitle());
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
         product.setBaseStock(request.getBaseStock() != null ? request.getBaseStock() : 0);
-        product.setImageUrl(imageUrl);
         product.setIsActive(true);
 
+        // Asignación de categoría si viene especificada
+        if (request.getCategoryId() != null) {
+            Category category = categoryRepository.findById(request.getCategoryId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Categoría no encontrada con ID: " + request.getCategoryId()));
+            product.setCategory(category);
+        }
+
+        // Subida de múltiples imágenes y asociación a ProductImage
+        if (files != null && !files.isEmpty()) {
+            List<ProductImage> productImages = new ArrayList<>();
+            int index = 0;
+            for (MultipartFile file : files) {
+                if (file != null && !file.isEmpty()) {
+                    String uploadedUrl = cloudinaryService.uploadImage(file);
+                    if (uploadedUrl != null) {
+                        ProductImage productImage = ProductImage.builder()
+                                .imageUrl(uploadedUrl)
+                                .isPrimary(index == 0) // La primera imagen se marca como portada
+                                .orderIndex(index)
+                                .product(product)
+                                .build();
+                        productImages.add(productImage);
+                        index++;
+                    }
+                }
+            }
+            product.setImages(productImages);
+        }
+
+        // Creación y asociación de variantes de talle/stock
         if (request.getVariants() != null && !request.getVariants().isEmpty()) {
             List<ProductVariant> variants = new ArrayList<>();
             for (VariantDTO vDto : request.getVariants()) {
@@ -81,21 +110,29 @@ public class ProductService {
     }
 
     /**
-     * Lista productos activos paginados para el catálogo público.
+     * Lista productos activos paginados con filtro opcional por categoría.
      */
     @Transactional(readOnly = true)
-    public Page<ProductResponse> getActiveProducts(Pageable pageable) {
+    public Page<ProductResponse> getActiveProducts(Long categoryId, Pageable pageable) {
+        if (categoryId != null) {
+            return productRepository.findByIsActiveTrueAndCategoryId(categoryId, pageable)
+                    .map(this::mapToResponse);
+        }
         return productRepository.findByIsActiveTrue(pageable)
                 .map(this::mapToResponse);
     }
 
     /**
-     * Busca productos activos por título con paginación para el catálogo público.
+     * Busca productos activos por título con paginación y filtro opcional por categoría.
      */
     @Transactional(readOnly = true)
-    public Page<ProductResponse> searchActiveProducts(String title, Pageable pageable) {
+    public Page<ProductResponse> searchActiveProducts(String title, Long categoryId, Pageable pageable) {
         if (title == null || title.trim().isEmpty()) {
-            return getActiveProducts(pageable);
+            return getActiveProducts(categoryId, pageable);
+        }
+        if (categoryId != null) {
+            return productRepository.findByTitleContainingIgnoreCaseAndIsActiveTrueAndCategoryId(title.trim(), categoryId, pageable)
+                    .map(this::mapToResponse);
         }
         return productRepository.findByTitleContainingIgnoreCaseAndIsActiveTrue(title.trim(), pageable)
                 .map(this::mapToResponse);
@@ -107,15 +144,15 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProductById(Long id) {
         Product product = productRepository.findById(id)
-                    .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
         return mapToResponse(product);
     }
 
     /**
-     * Actualiza un producto recibiendo el JSON serializado como String y el archivo opcional.
+     * Actualiza un producto recibiendo el JSON serializado como String y lista de archivos opcional.
      */
     @Transactional
-    public ProductResponse updateProduct(Long id, String productJson, MultipartFile file) {
+    public ProductResponse updateProduct(Long id, String productJson, List<MultipartFile> files) {
         ProductRequest request;
         try {
             request = objectMapper.readValue(productJson, ProductRequest.class);
@@ -124,14 +161,14 @@ public class ProductService {
             throw new IllegalArgumentException("El formato del JSON del producto es inválido", e);
         }
 
-        return updateProduct(id, request, file);
+        return updateProduct(id, request, files);
     }
 
     /**
-     * Actualiza los datos de un producto y opcionalmente reemplaza la imagen si se envía un archivo nuevo.
+     * Actualiza los datos de un producto y opcionalmente añade/reemplaza imágenes.
      */
     @Transactional
-    public ProductResponse updateProduct(Long id, ProductRequest request, MultipartFile file) {
+    public ProductResponse updateProduct(Long id, ProductRequest request, List<MultipartFile> files) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
 
@@ -142,10 +179,32 @@ public class ProductService {
             product.setBaseStock(request.getBaseStock());
         }
 
-        // Si se provee una nueva imagen, se sube y actualiza la URL
-        if (file != null && !file.isEmpty()) {
-            String newImageUrl = cloudinaryService.uploadImage(file);
-            product.setImageUrl(newImageUrl);
+        // Actualizar categoría si se proporciona
+        if (request.getCategoryId() != null) {
+            Category category = categoryRepository.findById(request.getCategoryId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Categoría no encontrada con ID: " + request.getCategoryId()));
+            product.setCategory(category);
+        }
+
+        // Si se proveen nuevas imágenes, se procesan y se agregan a la colección
+        if (files != null && !files.isEmpty()) {
+            product.getImages().clear();
+            int index = 0;
+            for (MultipartFile file : files) {
+                if (file != null && !file.isEmpty()) {
+                    String uploadedUrl = cloudinaryService.uploadImage(file);
+                    if (uploadedUrl != null) {
+                        ProductImage productImage = ProductImage.builder()
+                                .imageUrl(uploadedUrl)
+                                .isPrimary(index == 0)
+                                .orderIndex(index)
+                                .product(product)
+                                .build();
+                        product.getImages().add(productImage);
+                        index++;
+                    }
+                }
+            }
         }
 
         // Actualizar variantes si se incluyen en la petición
@@ -190,14 +249,29 @@ public class ProductService {
                     .collect(Collectors.toList());
         }
 
+        List<ProductImageResponse> imageDTOs = new ArrayList<>();
+        if (product.getImages() != null) {
+            imageDTOs = product.getImages().stream()
+                    .map(img -> ProductImageResponse.builder()
+                            .id(img.getId())
+                            .imageUrl(img.getImageUrl())
+                            .isPrimary(img.getIsPrimary())
+                            .orderIndex(img.getOrderIndex())
+                            .build())
+                    .collect(Collectors.toList());
+        }
+
         return ProductResponse.builder()
                 .id(product.getId())
                 .title(product.getTitle())
                 .description(product.getDescription())
                 .price(product.getPrice())
                 .baseStock(product.getBaseStock())
-                .imageUrl(product.getImageUrl())
                 .isActive(product.getIsActive())
+                .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .categorySlug(product.getCategory() != null ? product.getCategory().getSlug() : null)
+                .images(imageDTOs)
                 .variants(variantDTOs)
                 .build();
     }

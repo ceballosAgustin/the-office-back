@@ -33,6 +33,8 @@ public class ProductRequest {
     @Min(value = 0, message = "El stock base no puede ser negativo")
     private Integer baseStock;
 
+    private Long categoryId;
+
     @Valid
     @Builder.Default
     private List<VariantDTO> variants = new ArrayList<>();

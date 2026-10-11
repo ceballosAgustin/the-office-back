@@ -20,8 +20,14 @@ public class ProductResponse {
     private String description;
     private BigDecimal price;
     private Integer baseStock;
-    private String imageUrl;
     private Boolean isActive;
+
+    private Long categoryId;
+    private String categoryName;
+    private String categorySlug;
+
+    @Builder.Default
+    private List<ProductImageResponse> images = new ArrayList<>();
 
     @Builder.Default
     private List<VariantDTO> variants = new ArrayList<>();

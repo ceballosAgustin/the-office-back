@@ -69,6 +69,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         // Permitir crear pedidos y consultar estado por orderNumber para clientes invitados (Guest checkout)
                         .requestMatchers(HttpMethod.POST, "/api/orders/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/orders/**").permitAll()

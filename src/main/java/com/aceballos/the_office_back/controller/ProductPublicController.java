@@ -18,24 +18,26 @@ public class ProductPublicController {
     private final ProductService productService;
 
     /**
-     * Catálogo público paginado de productos activos.
-     * Ejemplo: GET /api/products?page=0&size=12&sort=id,desc
+     * Catálogo público paginado de productos activos con filtro opcional por categoría.
+     * Ejemplo: GET /api/products?categoryId=1&page=0&size=12&sort=price,asc
      */
     @GetMapping
     public ResponseEntity<Page<ProductResponse>> getActiveProducts(
+            @RequestParam(name = "categoryId", required = false) Long categoryId,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.getActiveProducts(pageable));
+        return ResponseEntity.ok(productService.getActiveProducts(categoryId, pageable));
     }
 
     /**
-     * Búsqueda por título en el catálogo público.
-     * Ejemplo: GET /api/products/search?title=remera&page=0&size=12
+     * Búsqueda por título en el catálogo público con filtro opcional por categoría.
+     * Ejemplo: GET /api/products/search?title=remera&categoryId=2&page=0&size=12
      */
     @GetMapping("/search")
     public ResponseEntity<Page<ProductResponse>> searchProducts(
             @RequestParam(name = "title", required = false) String title,
+            @RequestParam(name = "categoryId", required = false) Long categoryId,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.searchActiveProducts(title, pageable));
+        return ResponseEntity.ok(productService.searchActiveProducts(title, categoryId, pageable));
     }
 
     /**
