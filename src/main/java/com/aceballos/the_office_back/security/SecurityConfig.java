@@ -67,7 +67,10 @@ public class SecurityConfig {
                         })
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()
+                        // Endpoints públicos de auth
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register", "/api/auth/setup-admin").permitAll()
+                        // Cambio de contraseña: requiere JWT válido
+                        .requestMatchers(HttpMethod.PUT, "/api/auth/password").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         // Permitir crear pedidos y consultar estado por orderNumber para clientes invitados (Guest checkout)

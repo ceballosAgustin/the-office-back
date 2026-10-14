@@ -14,12 +14,15 @@ import com.aceballos.the_office_back.repository.OrderRepository;
 import com.aceballos.the_office_back.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -34,6 +37,9 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductVariantRepository productVariantRepository;
+
+    @Value("${app.whatsapp.phone-number}")
+    private String whatsappPhoneNumber;
 
     /**
      * Crea una orden asegurando:
@@ -103,7 +109,9 @@ public class OrderService {
         log.info("Orden creada con éxito: {} por un total de {}", savedOrder.getOrderNumber(),
                 savedOrder.getTotalAmount());
 
-        return mapToResponse(savedOrder);
+        OrderResponse response = mapToResponse(savedOrder);
+        response.setWhatsappUrl(buildWhatsappUrl(savedOrder));
+        return response;
     }
 
     /**
@@ -203,6 +211,21 @@ public class OrderService {
         String datePart = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
         String randomPart = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
         return "ORD-" + datePart + "-" + randomPart;
+    }
+
+    /**
+     * Genera el enlace de WhatsApp con un mensaje codificado incluyendo
+     * el número de pedido, total y nombre del cliente.
+     */
+    private String buildWhatsappUrl(Order order) {
+        String text = String.format(
+                // Mensaje provisorio
+                "Hola, acabo de hacer el pedido %s por un total de $%s. Mi nombre es %s.",
+                order.getOrderNumber(),
+                order.getTotalAmount().toPlainString(),
+                order.getContactName());
+        String encodedText = URLEncoder.encode(text, StandardCharsets.UTF_8);
+        return "https://wa.me/" + whatsappPhoneNumber + "?text=" + encodedText;
     }
 
     public OrderResponse mapToResponse(Order order) {

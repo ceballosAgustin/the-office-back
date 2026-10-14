@@ -24,6 +24,7 @@ public class OrderResponse {
     private String contactPhone;
     private BigDecimal totalAmount;
     private LocalDateTime createdAt;
+    private String whatsappUrl;
 
     @Builder.Default
     private List<OrderItemResponse> items = new ArrayList<>();
