@@ -5,13 +5,13 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 
 @Data
@@ -21,6 +21,7 @@ import java.util.List;
 public class ProductRequest {
 
     @NotBlank(message = "El título del producto es obligatorio")
+    @Size(max = 200, message = "El título del producto no puede superar los 200 caracteres")
     private String title;
 
     private String description;
@@ -29,13 +30,15 @@ public class ProductRequest {
     @DecimalMin(value = "0.0", inclusive = false, message = "El precio debe ser mayor a cero")
     private BigDecimal price;
 
-    @NotNull(message = "El stock base es obligatorio")
+    /**
+     * Campo legado opcional y no autoritativo.
+     * El stock real del producto se calcula siempre como la suma del stock de sus variantes activas.
+     */
     @Min(value = 0, message = "El stock base no puede ser negativo")
     private Integer baseStock;
 
     private Long categoryId;
 
     @Valid
-    @Builder.Default
-    private List<VariantDTO> variants = new ArrayList<>();
+    private List<VariantDTO> variants;
 }

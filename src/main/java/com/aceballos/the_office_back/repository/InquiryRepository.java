@@ -25,5 +25,8 @@ public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM Inquiry i WHERE i.id = :id")
     Optional<Inquiry> findByIdWithLock(@Param("id") Long id);
+
+    @Query("SELECT COUNT(ii) > 0 FROM InquiryItem ii WHERE ii.variantId = :variantId")
+    boolean existsInquiryItemByVariantId(@Param("variantId") Long variantId);
 }
 

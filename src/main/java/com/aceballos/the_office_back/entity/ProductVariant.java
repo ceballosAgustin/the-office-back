@@ -25,6 +25,9 @@ public class ProductVariant {
     @Column(nullable = false)
     private Integer stock = 0;
 
+    @Column(name = "is_active", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
+    private Boolean isActive = true;
+
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     @JsonIgnore

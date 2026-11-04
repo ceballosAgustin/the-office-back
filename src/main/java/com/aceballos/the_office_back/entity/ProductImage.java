@@ -24,6 +24,9 @@ public class ProductImage {
     @Column(name = "image_url", nullable = false, length = 500)
     private String imageUrl;
 
+    @Column(name = "public_id", length = 255)
+    private String publicId;
+
     @Builder.Default
     @Column(name = "is_primary", nullable = false)
     private Boolean isPrimary = false;

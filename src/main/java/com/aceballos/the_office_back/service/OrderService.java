@@ -99,6 +99,12 @@ public class OrderService {
                         "El producto '" + title + "' no se encuentra activo");
             }
 
+            // Validar que la variante esté activa
+            if (Boolean.FALSE.equals(variant.getIsActive())) {
+                throw new BusinessRuleException(
+                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+            }
+
             // Validar stock disponible
             if (variant.getStock() < itemReq.getQuantity()) {
                 throw new BusinessRuleException("Stock insuficiente para el producto '" +
@@ -106,8 +112,9 @@ public class OrderService {
                         "'. Stock actual: " + variant.getStock() + ", solicitado: " + itemReq.getQuantity());
             }
 
-            // Restar stock
+            // Restar stock y sincronizar baseStock del producto
             variant.setStock(variant.getStock() - itemReq.getQuantity());
+            variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
             productVariantRepository.save(variant);
 
             // Precio real desde la base de datos
@@ -193,6 +200,11 @@ public class OrderService {
                         "El producto '" + title + "' no se encuentra activo");
             }
 
+            if (Boolean.FALSE.equals(variant.getIsActive())) {
+                throw new BusinessRuleException(
+                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+            }
+
             if (variant.getStock() < inquiryItem.getQuantity()) {
                 throw new BusinessRuleException("Stock insuficiente para el producto '" +
                         variant.getProduct().getTitle() + "' en talle '" + variant.getSize() +
@@ -200,6 +212,7 @@ public class OrderService {
             }
 
             variant.setStock(variant.getStock() - inquiryItem.getQuantity());
+            variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
             productVariantRepository.save(variant);
 
             // Usar el precio de referencia capturado por el backend en la consulta
@@ -249,6 +262,9 @@ public class OrderService {
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "Variante no encontrada con ID: " + item.getProductVariant().getId()));
                 variant.setStock(variant.getStock() + item.getQuantity());
+                if (variant.getProduct() != null) {
+                    variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
+                }
                 productVariantRepository.save(variant);
             }
             log.info("Stock restaurado para la orden cancelada: {}", order.getOrderNumber());
@@ -262,12 +278,18 @@ public class OrderService {
                 ProductVariant variant = productVariantRepository.findByIdWithLock(item.getProductVariant().getId())
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "Variante no encontrada con ID: " + item.getProductVariant().getId()));
+                if (variant.getProduct() == null || !Boolean.TRUE.equals(variant.getProduct().getIsActive())
+                        || Boolean.FALSE.equals(variant.getIsActive())) {
+                    throw new BusinessRuleException(
+                            "No es posible reactivar la orden: El producto o variante no se encuentra activo");
+                }
                 if (variant.getStock() < item.getQuantity()) {
                     throw new BusinessRuleException(
                             "No es posible reactivar la orden: Stock insuficiente en " +
                                     variant.getProduct().getTitle() + " talle " + variant.getSize());
                 }
                 variant.setStock(variant.getStock() - item.getQuantity());
+                variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
                 productVariantRepository.save(variant);
             }
         }

@@ -81,7 +81,9 @@ class InquiryServiceTest {
         variantM.setId(101L);
         variantM.setSize("M");
         variantM.setStock(5);
+        variantM.setIsActive(true);
         variantM.setProduct(activeProduct);
+        activeProduct.setVariants(List.of(variantM));
     }
 
     @Test
@@ -266,6 +268,46 @@ class InquiryServiceTest {
         assertEquals(1, variantM.getStock());
         verify(orderRepository, never()).save(any());
         verify(inquiryRepository, never()).save(any());
+    }
+
+    @Test
+    void createAndConfirmInquiry_WhenVariantIsInactive_ShouldRejectWithBusinessRuleException() {
+        variantM.setIsActive(false);
+
+        when(productVariantRepository.findById(101L)).thenReturn(Optional.of(variantM));
+        when(inquiryRepository.existsByInquiryNumber(anyString())).thenReturn(false);
+
+        InquiryRequest request = InquiryRequest.builder()
+                .contactName("Juan")
+                .items(List.of(new InquiryItemRequest(101L, 1)))
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> inquiryService.createInquiry(request));
+
+        Inquiry inquiry = new Inquiry();
+        inquiry.setId(23L);
+        inquiry.setInquiryNumber("INQ-261019-ABC123");
+        inquiry.setStatus(InquiryStatus.NEW);
+        inquiry.setTotalAmount(new BigDecimal("28500.00"));
+        inquiry.setItems(List.of(
+                InquiryItem.builder()
+                        .id(1L)
+                        .inquiry(inquiry)
+                        .variantId(101L)
+                        .productTitle("Remera Oversize Dunder Mifflin")
+                        .size("M")
+                        .quantity(1)
+                        .unitPrice(new BigDecimal("28500.00"))
+                        .subtotal(new BigDecimal("28500.00"))
+                        .build()
+        ));
+
+        when(inquiryRepository.findByIdWithLock(23L)).thenReturn(Optional.of(inquiry));
+        when(productVariantRepository.findByIdWithLock(101L)).thenReturn(Optional.of(variantM));
+
+        assertThrows(BusinessRuleException.class, () -> inquiryService.confirmInquiry(23L, null));
+        assertEquals(InquiryStatus.NEW, inquiry.getStatus());
+        verify(orderRepository, never()).save(any());
     }
 }
 

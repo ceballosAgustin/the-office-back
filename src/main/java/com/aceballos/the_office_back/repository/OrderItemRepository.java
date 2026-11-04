@@ -13,4 +13,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
      * Permite consultar todos los ítems de un pedido específico.
      */
     List<OrderItem> findByOrderId(Long orderId);
+
+    boolean existsByProductVariantId(Long productVariantId);
 }

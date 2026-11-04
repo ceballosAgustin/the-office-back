@@ -94,6 +94,11 @@ public class InquiryService {
                         "El producto '" + title + "' no se encuentra activo");
             }
 
+            if (Boolean.FALSE.equals(variant.getIsActive())) {
+                throw new BusinessRuleException(
+                        "El talle '" + variant.getSize() + "' del producto '" + product.getTitle() + "' no se encuentra disponible");
+            }
+
             int totalRequestedForVariant = accumulatedQuantities.merge(
                     variant.getId(), itemReq.getQuantity(), Integer::sum);
 
