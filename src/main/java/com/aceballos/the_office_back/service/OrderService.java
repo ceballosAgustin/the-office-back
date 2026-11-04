@@ -1,9 +1,12 @@
 package com.aceballos.the_office_back.service;
 
+import com.aceballos.the_office_back.dto.ConfirmInquiryRequest;
 import com.aceballos.the_office_back.dto.OrderItemRequest;
 import com.aceballos.the_office_back.dto.OrderItemResponse;
 import com.aceballos.the_office_back.dto.OrderRequest;
 import com.aceballos.the_office_back.dto.OrderResponse;
+import com.aceballos.the_office_back.entity.Inquiry;
+import com.aceballos.the_office_back.entity.InquiryItem;
 import com.aceballos.the_office_back.entity.Order;
 import com.aceballos.the_office_back.entity.OrderItem;
 import com.aceballos.the_office_back.entity.OrderStatus;
@@ -19,6 +22,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.net.URLEncoder;
@@ -26,7 +30,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -66,15 +73,30 @@ public class OrderService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
 
-        for (OrderItemRequest itemReq : request.getItems()) {
-            ProductVariant variant = productVariantRepository.findById(itemReq.getVariantId())
+        // Adquirir bloqueo pesimista en orden ascendente de variantId para prevenir
+        // interbloqueos (deadlocks)
+        List<Long> sortedVariantIds = request.getItems().stream()
+                .map(OrderItemRequest::getVariantId)
+                .distinct()
+                .sorted(Comparator.naturalOrder())
+                .toList();
+
+        Map<Long, ProductVariant> lockedVariants = new HashMap<>();
+        for (Long variantId : sortedVariantIds) {
+            ProductVariant variant = productVariantRepository.findByIdWithLock(variantId)
                     .orElseThrow(() -> new ResourceNotFoundException(
-                            "Variante no encontrada con ID: " + itemReq.getVariantId()));
+                            "Variante no encontrada con ID: " + variantId));
+            lockedVariants.put(variantId, variant);
+        }
+
+        for (OrderItemRequest itemReq : request.getItems()) {
+            ProductVariant variant = lockedVariants.get(itemReq.getVariantId());
 
             // Validar que el producto padre esté activo
-            if (!Boolean.TRUE.equals(variant.getProduct().getIsActive())) {
+            if (variant.getProduct() == null || !Boolean.TRUE.equals(variant.getProduct().getIsActive())) {
+                String title = variant.getProduct() != null ? variant.getProduct().getTitle() : "Desconocido";
                 throw new BusinessRuleException(
-                        "El producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+                        "El producto '" + title + "' no se encuentra activo");
             }
 
             // Validar stock disponible
@@ -115,6 +137,95 @@ public class OrderService {
     }
 
     /**
+     * Crea una orden real a partir de una consulta comercial confirmada por el administrador.
+     * Utiliza bloqueo pesimista sobre las variantes, valida existencias y estado de los productos,
+     * descuenta el inventario y utiliza los precios históricos de referencia guardados en la consulta.
+     */
+    @Transactional
+    public Order createOrderFromInquiry(Inquiry inquiry, ConfirmInquiryRequest confirmRequest) {
+        if (inquiry.getItems() == null || inquiry.getItems().isEmpty()) {
+            throw new BusinessRuleException("La consulta no contiene artículos para convertir en pedido");
+        }
+
+        // Bloquear variantes en orden ascendente de ID para evitar deadlocks en confirmaciones concurrentes
+        List<Long> sortedVariantIds = inquiry.getItems().stream()
+                .map(InquiryItem::getVariantId)
+                .distinct()
+                .sorted(Comparator.naturalOrder())
+                .toList();
+
+        Map<Long, ProductVariant> lockedVariants = new HashMap<>();
+        for (Long variantId : sortedVariantIds) {
+            ProductVariant variant = productVariantRepository.findByIdWithLock(variantId)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Variante no encontrada con ID: " + variantId));
+            lockedVariants.put(variantId, variant);
+        }
+
+        String contactName = "Cliente WhatsApp";
+        if (confirmRequest != null && StringUtils.hasText(confirmRequest.getContactName())) {
+            contactName = confirmRequest.getContactName().trim();
+        } else if (StringUtils.hasText(inquiry.getContactName())) {
+            contactName = inquiry.getContactName().trim();
+        }
+
+        String contactPhone = "WhatsApp";
+        if (confirmRequest != null && StringUtils.hasText(confirmRequest.getContactPhone())) {
+            contactPhone = confirmRequest.getContactPhone().trim();
+        }
+
+        Order order = new Order();
+        order.setOrderNumber(generateUniqueOrderNumber());
+        order.setStatus(OrderStatus.PENDING);
+        order.setContactName(contactName);
+        order.setContactPhone(contactPhone);
+        order.setCreatedAt(LocalDateTime.now());
+
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        List<OrderItem> orderItems = new ArrayList<>();
+
+        for (InquiryItem inquiryItem : inquiry.getItems()) {
+            ProductVariant variant = lockedVariants.get(inquiryItem.getVariantId());
+
+            if (variant.getProduct() == null || !Boolean.TRUE.equals(variant.getProduct().getIsActive())) {
+                String title = variant.getProduct() != null ? variant.getProduct().getTitle() : inquiryItem.getProductTitle();
+                throw new BusinessRuleException(
+                        "El producto '" + title + "' no se encuentra activo");
+            }
+
+            if (variant.getStock() < inquiryItem.getQuantity()) {
+                throw new BusinessRuleException("Stock insuficiente para el producto '" +
+                        variant.getProduct().getTitle() + "' en talle '" + variant.getSize() +
+                        "'. Stock actual: " + variant.getStock() + ", solicitado: " + inquiryItem.getQuantity());
+            }
+
+            variant.setStock(variant.getStock() - inquiryItem.getQuantity());
+            productVariantRepository.save(variant);
+
+            // Usar el precio de referencia capturado por el backend en la consulta
+            BigDecimal unitPrice = inquiryItem.getUnitPrice();
+            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(inquiryItem.getQuantity()));
+            totalAmount = totalAmount.add(subtotal);
+
+            OrderItem orderItem = new OrderItem();
+            orderItem.setOrder(order);
+            orderItem.setProductVariant(variant);
+            orderItem.setQuantity(inquiryItem.getQuantity());
+            orderItem.setPriceAtPurchase(unitPrice);
+
+            orderItems.add(orderItem);
+        }
+
+        order.setTotalAmount(totalAmount);
+        order.setItems(orderItems);
+
+        Order savedOrder = orderRepository.save(order);
+        log.info("Orden {} creada a partir de la consulta {} por un total de {}",
+                savedOrder.getOrderNumber(), inquiry.getInquiryNumber(), savedOrder.getTotalAmount());
+        return savedOrder;
+    }
+
+    /**
      * Actualiza el estado de la orden por parte del administrador.
      * Si pasa a CANCELLED y previamente estaba PENDING o COMPLETED,
      * se restaura el stock sumándolo a las variantes.
@@ -131,10 +242,12 @@ public class OrderService {
         }
 
         // Si se cancela una orden que estaba activa, se restaura el stock de cada
-        // variante
+        // variante con bloqueo pesimista
         if (newStatus == OrderStatus.CANCELLED && currentStatus != OrderStatus.CANCELLED) {
             for (OrderItem item : order.getItems()) {
-                ProductVariant variant = item.getProductVariant();
+                ProductVariant variant = productVariantRepository.findByIdWithLock(item.getProductVariant().getId())
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Variante no encontrada con ID: " + item.getProductVariant().getId()));
                 variant.setStock(variant.getStock() + item.getQuantity());
                 productVariantRepository.save(variant);
             }
@@ -142,11 +255,13 @@ public class OrderService {
         }
 
         // Si una orden cancelada se vuelve a activar/completar, se valida y descuenta
-        // nuevamente
+        // nuevamente con bloqueo pesimista
         if (currentStatus == OrderStatus.CANCELLED
                 && (newStatus == OrderStatus.PENDING || newStatus == OrderStatus.COMPLETED)) {
             for (OrderItem item : order.getItems()) {
-                ProductVariant variant = item.getProductVariant();
+                ProductVariant variant = productVariantRepository.findByIdWithLock(item.getProductVariant().getId())
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Variante no encontrada con ID: " + item.getProductVariant().getId()));
                 if (variant.getStock() < item.getQuantity()) {
                     throw new BusinessRuleException(
                             "No es posible reactivar la orden: Stock insuficiente en " +
@@ -209,8 +324,12 @@ public class OrderService {
 
     private String generateUniqueOrderNumber() {
         String datePart = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
-        String randomPart = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-        return "ORD-" + datePart + "-" + randomPart;
+        String candidate;
+        do {
+            String randomPart = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+            candidate = "ORD-" + datePart + "-" + randomPart;
+        } while (orderRepository.existsByOrderNumber(candidate));
+        return candidate;
     }
 
     /**

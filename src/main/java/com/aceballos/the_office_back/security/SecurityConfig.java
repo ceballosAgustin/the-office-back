@@ -73,9 +73,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/auth/password").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
-                        // Permitir crear pedidos y consultar estado por orderNumber para clientes invitados (Guest checkout)
-                        .requestMatchers(HttpMethod.POST, "/api/orders/**").permitAll()
+                        // Permitir registrar consultas comerciales públicas (sin descontar stock ni crear pedido)
+                        .requestMatchers(HttpMethod.POST, "/api/inquiries").permitAll()
+                        // Consultar estado de pedido por orderNumber sigue siendo público; crear órdenes directo requiere ADMIN
                         .requestMatchers(HttpMethod.GET, "/api/orders/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/orders/**").hasRole("ADMIN")
                         // Rutas de administración protegidas por rol ADMIN
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
