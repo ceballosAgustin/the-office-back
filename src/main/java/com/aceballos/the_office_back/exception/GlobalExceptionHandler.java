@@ -35,6 +35,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
     }
 
+    @ExceptionHandler(ResourceConflictException.class)
+    public ResponseEntity<ErrorResponse> handleResourceConflictException(ResourceConflictException ex) {
+        log.warn("Conflicto de estado o recurso: {}", ex.getMessage());
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.CONFLICT.value())
+                .error(HttpStatus.CONFLICT.getReasonPhrase())
+                .message(ex.getMessage())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
+    }
+
     @ExceptionHandler({BusinessRuleException.class, IllegalArgumentException.class})
     public ResponseEntity<ErrorResponse> handleBadRequestExceptions(RuntimeException ex) {
         log.warn("Petición inválida o regla de negocio no cumplida: {}", ex.getMessage());

@@ -102,7 +102,8 @@ public class OrderService {
             // Validar que la variante esté activa
             if (Boolean.FALSE.equals(variant.getIsActive())) {
                 throw new BusinessRuleException(
-                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle()
+                                + "' no se encuentra activo");
             }
 
             // Validar stock disponible
@@ -144,9 +145,12 @@ public class OrderService {
     }
 
     /**
-     * Crea una orden real a partir de una consulta comercial confirmada por el administrador.
-     * Utiliza bloqueo pesimista sobre las variantes, valida existencias y estado de los productos,
-     * descuenta el inventario y utiliza los precios históricos de referencia guardados en la consulta.
+     * Crea una orden real a partir de una consulta comercial confirmada por el
+     * administrador.
+     * Utiliza bloqueo pesimista sobre las variantes, valida existencias y estado de
+     * los productos,
+     * descuenta el inventario y utiliza los precios históricos de referencia
+     * guardados en la consulta.
      */
     @Transactional
     public Order createOrderFromInquiry(Inquiry inquiry, ConfirmInquiryRequest confirmRequest) {
@@ -154,7 +158,8 @@ public class OrderService {
             throw new BusinessRuleException("La consulta no contiene artículos para convertir en pedido");
         }
 
-        // Bloquear variantes en orden ascendente de ID para evitar deadlocks en confirmaciones concurrentes
+        // Bloquear variantes en orden ascendente de ID para evitar deadlocks en
+        // confirmaciones concurrentes
         List<Long> sortedVariantIds = inquiry.getItems().stream()
                 .map(InquiryItem::getVariantId)
                 .distinct()
@@ -195,14 +200,16 @@ public class OrderService {
             ProductVariant variant = lockedVariants.get(inquiryItem.getVariantId());
 
             if (variant.getProduct() == null || !Boolean.TRUE.equals(variant.getProduct().getIsActive())) {
-                String title = variant.getProduct() != null ? variant.getProduct().getTitle() : inquiryItem.getProductTitle();
+                String title = variant.getProduct() != null ? variant.getProduct().getTitle()
+                        : inquiryItem.getProductTitle();
                 throw new BusinessRuleException(
                         "El producto '" + title + "' no se encuentra activo");
             }
 
             if (Boolean.FALSE.equals(variant.getIsActive())) {
                 throw new BusinessRuleException(
-                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle() + "' no se encuentra activo");
+                        "El talle '" + variant.getSize() + "' del producto '" + variant.getProduct().getTitle()
+                                + "' no se encuentra activo");
             }
 
             if (variant.getStock() < inquiryItem.getQuantity()) {
