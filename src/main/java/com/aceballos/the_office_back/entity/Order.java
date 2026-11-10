@@ -8,7 +8,8 @@ import lombok.ToString;
 import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,7 +41,7 @@ public class Order {
     private BigDecimal totalAmount;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
     /**
      * Usuario registrado opcional (Guest Checkout):
@@ -56,10 +57,13 @@ public class Order {
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();
 
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt != null ? createdAt.truncatedTo(ChronoUnit.MICROS) : null;
+    }
+
     @PrePersist
-    protected void onCreate() {
-        if (this.createdAt == null) {
-            this.createdAt = LocalDateTime.now();
-        }
+    public void onCreate() {
+        this.createdAt = (this.createdAt != null ? this.createdAt : Instant.now())
+                .truncatedTo(ChronoUnit.MICROS);
     }
 }

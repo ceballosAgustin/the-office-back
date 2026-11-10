@@ -12,9 +12,11 @@ import com.aceballos.the_office_back.entity.OrderItem;
 import com.aceballos.the_office_back.entity.OrderStatus;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
+import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.OrderRepository;
 import com.aceballos.the_office_back.repository.ProductVariantRepository;
+import com.aceballos.the_office_back.util.CurrencyFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +29,9 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -42,10 +46,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OrderService {
 
+    public static final ZoneId ARGENTINA_ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
+    private static final DateTimeFormatter ARGENTINA_DATE_PREFIX_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
+
     private final OrderRepository orderRepository;
     private final ProductVariantRepository productVariantRepository;
 
-    @Value("${app.whatsapp.phone-number}")
+    @Value("${app.whatsapp.phone-number:}")
     private String whatsappPhoneNumber;
 
     /**
@@ -61,14 +68,11 @@ public class OrderService {
             throw new IllegalArgumentException("La orden debe contener al menos un producto");
         }
 
-        String orderNumber = generateUniqueOrderNumber();
-
         Order order = new Order();
-        order.setOrderNumber(orderNumber);
+        order.setOrderNumber(generateUniqueOrderNumber(order.getCreatedAt()));
         order.setStatus(OrderStatus.PENDING);
         order.setContactName(request.getContactName());
         order.setContactPhone(request.getContactPhone());
-        order.setCreatedAt(LocalDateTime.now());
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
@@ -107,14 +111,15 @@ public class OrderService {
             }
 
             // Validar stock disponible
-            if (variant.getStock() < itemReq.getQuantity()) {
-                throw new BusinessRuleException("Stock insuficiente para el producto '" +
+            int availableStock = variant.getStock() != null ? variant.getStock() : 0;
+            if (availableStock < itemReq.getQuantity()) {
+                throw new ResourceConflictException("Stock insuficiente para el producto '" +
                         variant.getProduct().getTitle() + "' en talle '" + variant.getSize() +
-                        "'. Stock actual: " + variant.getStock() + ", solicitado: " + itemReq.getQuantity());
+                        "'. Stock disponible: " + availableStock + ", cantidad solicitada: " + itemReq.getQuantity());
             }
 
             // Restar stock y sincronizar baseStock del producto
-            variant.setStock(variant.getStock() - itemReq.getQuantity());
+            variant.setStock(availableStock - itemReq.getQuantity());
             variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
             productVariantRepository.save(variant);
 
@@ -187,11 +192,10 @@ public class OrderService {
         }
 
         Order order = new Order();
-        order.setOrderNumber(generateUniqueOrderNumber());
+        order.setOrderNumber(generateUniqueOrderNumber(order.getCreatedAt()));
         order.setStatus(OrderStatus.PENDING);
         order.setContactName(contactName);
         order.setContactPhone(contactPhone);
-        order.setCreatedAt(LocalDateTime.now());
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
@@ -212,13 +216,15 @@ public class OrderService {
                                 + "' no se encuentra activo");
             }
 
-            if (variant.getStock() < inquiryItem.getQuantity()) {
-                throw new BusinessRuleException("Stock insuficiente para el producto '" +
+            int availableStock = variant.getStock() != null ? variant.getStock() : 0;
+            if (availableStock < inquiryItem.getQuantity()) {
+                throw new ResourceConflictException("Stock insuficiente para el producto '" +
                         variant.getProduct().getTitle() + "' en talle '" + variant.getSize() +
-                        "'. Stock actual: " + variant.getStock() + ", solicitado: " + inquiryItem.getQuantity());
+                        "'. Stock disponible: " + availableStock + ", cantidad solicitada: "
+                        + inquiryItem.getQuantity());
             }
 
-            variant.setStock(variant.getStock() - inquiryItem.getQuantity());
+            variant.setStock(availableStock - inquiryItem.getQuantity());
             variant.getProduct().setBaseStock(ProductService.calculateActiveStock(variant.getProduct()));
             productVariantRepository.save(variant);
 
@@ -351,8 +357,13 @@ public class OrderService {
         return mapToResponse(order);
     }
 
-    private String generateUniqueOrderNumber() {
-        String datePart = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
+    static String formatArgentinaDatePrefix(Instant instant) {
+        Instant target = instant != null ? instant : Instant.now();
+        return ZonedDateTime.ofInstant(target, ARGENTINA_ZONE).format(ARGENTINA_DATE_PREFIX_FORMATTER);
+    }
+
+    private String generateUniqueOrderNumber(Instant referenceInstant) {
+        String datePart = formatArgentinaDatePrefix(referenceInstant);
         String candidate;
         do {
             String randomPart = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
@@ -363,17 +374,21 @@ public class OrderService {
 
     /**
      * Genera el enlace de WhatsApp con un mensaje codificado incluyendo
-     * el número de pedido, total y nombre del cliente.
+     * el número de pedido, total en USD y nombre del cliente.
      */
     private String buildWhatsappUrl(Order order) {
+        String digitsOnly = whatsappPhoneNumber != null ? whatsappPhoneNumber.replaceAll("[^0-9]", "") : "";
+        return buildWhatsappUrl(order, digitsOnly);
+    }
+
+    private String buildWhatsappUrl(Order order, String normalizedPhone) {
         String text = String.format(
-                // Mensaje provisorio
-                "Hola, acabo de hacer el pedido %s por un total de $%s. Mi nombre es %s.",
+                "Hola, acabo de hacer el pedido %s por un total de %s. Mi nombre es %s.",
                 order.getOrderNumber(),
-                order.getTotalAmount().toPlainString(),
+                CurrencyFormatter.formatUsd(order.getTotalAmount()),
                 order.getContactName());
         String encodedText = URLEncoder.encode(text, StandardCharsets.UTF_8);
-        return "https://wa.me/" + whatsappPhoneNumber + "?text=" + encodedText;
+        return "https://wa.me/" + normalizedPhone + "?text=" + encodedText;
     }
 
     public OrderResponse mapToResponse(Order order) {
@@ -392,6 +407,14 @@ public class OrderService {
                     .collect(Collectors.toList());
         }
 
+        String whatsappUrl = null;
+        if (StringUtils.hasText(whatsappPhoneNumber)) {
+            String digitsOnly = whatsappPhoneNumber.replaceAll("[^0-9]", "");
+            if (!digitsOnly.isEmpty()) {
+                whatsappUrl = buildWhatsappUrl(order, digitsOnly);
+            }
+        }
+
         return OrderResponse.builder()
                 .id(order.getId())
                 .orderNumber(order.getOrderNumber())
@@ -400,6 +423,7 @@ public class OrderService {
                 .contactPhone(order.getContactPhone())
                 .totalAmount(order.getTotalAmount())
                 .createdAt(order.getCreatedAt())
+                .whatsappUrl(whatsappUrl)
                 .items(itemResponses)
                 .build();
     }

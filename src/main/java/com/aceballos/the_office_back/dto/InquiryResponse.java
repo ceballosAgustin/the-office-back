@@ -7,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -21,7 +21,7 @@ public class InquiryResponse {
     private String inquiryNumber;
     private InquiryStatus status;
     private String contactName;
-    private LocalDateTime createdAt;
+    private Instant createdAt;
     private BigDecimal totalAmount;
     private String whatsappUrl;
     private Long orderId;

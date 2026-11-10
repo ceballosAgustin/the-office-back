@@ -14,7 +14,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -26,7 +27,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleResourceNotFoundException(ResourceNotFoundException ex) {
         log.warn("Recurso no encontrado: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.NOT_FOUND.value())
                 .error(HttpStatus.NOT_FOUND.getReasonPhrase())
                 .message(ex.getMessage())
@@ -39,7 +40,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleResourceConflictException(ResourceConflictException ex) {
         log.warn("Conflicto de estado o recurso: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.CONFLICT.value())
                 .error(HttpStatus.CONFLICT.getReasonPhrase())
                 .message(ex.getMessage())
@@ -48,11 +49,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
     }
 
-    @ExceptionHandler({BusinessRuleException.class, IllegalArgumentException.class})
+    @ExceptionHandler({ BusinessRuleException.class, IllegalArgumentException.class })
     public ResponseEntity<ErrorResponse> handleBadRequestExceptions(RuntimeException ex) {
         log.warn("Petición inválida o regla de negocio no cumplida: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message(ex.getMessage())
@@ -61,11 +62,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    @ExceptionHandler({ HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class })
     public ResponseEntity<ErrorResponse> handleInvalidFormatExceptions(Exception ex) {
         log.warn("Formato de petición o parámetro inválido: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message("El formato de los datos enviados o el valor de un parámetro no es válido")
@@ -78,7 +79,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAccessDeniedException(AccessDeniedException ex) {
         log.warn("Acceso denegado: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.FORBIDDEN.value())
                 .error(HttpStatus.FORBIDDEN.getReasonPhrase())
                 .message("No tienes permisos suficientes para realizar esta operación")
@@ -99,7 +100,7 @@ public class GlobalExceptionHandler {
         log.warn("Error de validación en parámetros: {}", errors);
 
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message("Error de validación en los campos enviados")
@@ -120,7 +121,7 @@ public class GlobalExceptionHandler {
         log.warn("Error de validación de restricciones: {}", errors);
 
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message("Error de validación en los campos enviados")
@@ -134,7 +135,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBadCredentialsException(BadCredentialsException ex) {
         log.warn("Intento de autenticación fallido: {}", ex.getMessage());
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.UNAUTHORIZED.value())
                 .error(HttpStatus.UNAUTHORIZED.getReasonPhrase())
                 .message("Credenciales inválidas")
@@ -147,7 +148,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleGlobalException(Exception ex) {
         log.error("Error no controlado en el servidor: ", ex);
         ErrorResponse errorResponse = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
                 .message("Ocurrió un error interno en el servidor. Por favor, intenta de nuevo más tarde.")

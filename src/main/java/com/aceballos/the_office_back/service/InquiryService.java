@@ -14,9 +14,11 @@ import com.aceballos.the_office_back.entity.Product;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
+import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.InquiryRepository;
 import com.aceballos.the_office_back.repository.ProductVariantRepository;
+import com.aceballos.the_office_back.util.CurrencyFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,15 +31,14 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -46,6 +47,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InquiryService {
+
+    public static final ZoneId ARGENTINA_ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
+    private static final DateTimeFormatter ARGENTINA_DATE_PREFIX_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
 
     private final InquiryRepository inquiryRepository;
     private final ProductVariantRepository productVariantRepository;
@@ -57,6 +61,7 @@ public class InquiryService {
     /**
      * Registra una consulta comercial pública sin crear pedido ni descontar stock.
      * Valida la existencia y disponibilidad actual de los productos/variantes,
+     * consolida variantes repetidas dentro de la misma solicitud,
      * toma una fotografía histórica de precios, talles e imágenes desde la base de datos,
      * y genera el enlace de WhatsApp con el detalle formateado.
      */
@@ -66,26 +71,35 @@ public class InquiryService {
             throw new IllegalArgumentException("La consulta debe contener al menos un producto");
         }
 
+        // Validar cada línea y consolidar cantidades por variante preservando el orden de aparición
+        Map<Long, Integer> consolidatedQuantities = new LinkedHashMap<>();
+        for (InquiryItemRequest itemReq : request.getItems()) {
+            if (itemReq == null || itemReq.getVariantId() == null) {
+                throw new IllegalArgumentException("El ID de la variante es obligatorio");
+            }
+            if (itemReq.getQuantity() == null || itemReq.getQuantity() < 1) {
+                throw new IllegalArgumentException("La cantidad de cada artículo debe ser mayor o igual a 1");
+            }
+            consolidatedQuantities.merge(itemReq.getVariantId(), itemReq.getQuantity(), Integer::sum);
+        }
+
         String normalizedPhone = validateAndNormalizeWhatsappPhone();
 
         Inquiry inquiry = new Inquiry();
-        inquiry.setInquiryNumber(generateUniqueInquiryNumber());
+        inquiry.setInquiryNumber(generateUniqueInquiryNumber(inquiry.getCreatedAt()));
         inquiry.setStatus(InquiryStatus.NEW);
         inquiry.setContactName(StringUtils.hasText(request.getContactName()) ? request.getContactName().trim() : null);
-        inquiry.setCreatedAt(LocalDateTime.now());
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<InquiryItem> inquiryItems = new ArrayList<>();
-        Map<Long, Integer> accumulatedQuantities = new HashMap<>();
 
-        for (InquiryItemRequest itemReq : request.getItems()) {
-            if (itemReq.getQuantity() == null || itemReq.getQuantity() <= 0) {
-                throw new IllegalArgumentException("La cantidad de cada artículo debe ser mayor a cero");
-            }
+        for (Map.Entry<Long, Integer> entry : consolidatedQuantities.entrySet()) {
+            Long variantId = entry.getKey();
+            int requestedQuantity = entry.getValue();
 
-            ProductVariant variant = productVariantRepository.findById(itemReq.getVariantId())
+            ProductVariant variant = productVariantRepository.findById(variantId)
                     .orElseThrow(() -> new ResourceNotFoundException(
-                            "Variante no encontrada con ID: " + itemReq.getVariantId()));
+                            "Variante no encontrada con ID: " + variantId));
 
             Product product = variant.getProduct();
             if (product == null || !Boolean.TRUE.equals(product.getIsActive())) {
@@ -99,18 +113,17 @@ public class InquiryService {
                         "El talle '" + variant.getSize() + "' del producto '" + product.getTitle() + "' no se encuentra disponible");
             }
 
-            int totalRequestedForVariant = accumulatedQuantities.merge(
-                    variant.getId(), itemReq.getQuantity(), Integer::sum);
+            int availableStock = variant.getStock() != null ? variant.getStock() : 0;
 
-            // Validación informativa de disponibilidad actual (no reserva ni descuenta stock)
-            if (variant.getStock() < totalRequestedForVariant) {
-                throw new BusinessRuleException("Stock insuficiente para el producto '" +
+            // Validación de disponibilidad actual (no reserva ni descuenta stock)
+            if (availableStock < requestedQuantity) {
+                throw new ResourceConflictException("Stock insuficiente para el producto '" +
                         product.getTitle() + "' en talle '" + variant.getSize() +
-                        "'. Stock actual: " + variant.getStock() + ", solicitado: " + totalRequestedForVariant);
+                        "'. Stock disponible: " + availableStock + ", cantidad solicitada: " + requestedQuantity);
             }
 
             BigDecimal unitPrice = product.getPrice();
-            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(itemReq.getQuantity()));
+            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(requestedQuantity));
             totalAmount = totalAmount.add(subtotal);
 
             String primaryImageUrl = resolveProductImageUrl(product);
@@ -120,7 +133,7 @@ public class InquiryService {
                     .variantId(variant.getId())
                     .productTitle(product.getTitle())
                     .size(variant.getSize())
-                    .quantity(itemReq.getQuantity())
+                    .quantity(requestedQuantity)
                     .unitPrice(unitPrice)
                     .subtotal(subtotal)
                     .imageUrl(primaryImageUrl)
@@ -273,8 +286,13 @@ public class InquiryService {
                 .getImageUrl();
     }
 
-    private String generateUniqueInquiryNumber() {
-        String datePart = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
+    static String formatArgentinaDatePrefix(Instant instant) {
+        Instant target = instant != null ? instant : Instant.now();
+        return ZonedDateTime.ofInstant(target, ARGENTINA_ZONE).format(ARGENTINA_DATE_PREFIX_FORMATTER);
+    }
+
+    private String generateUniqueInquiryNumber(Instant referenceInstant) {
+        String datePart = formatArgentinaDatePrefix(referenceInstant);
         String candidate;
         do {
             String randomPart = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
@@ -306,6 +324,11 @@ public class InquiryService {
 
         if (inquiry.getItems() != null) {
             for (InquiryItem item : inquiry.getItems()) {
+                BigDecimal itemSubtotal = item.getSubtotal() != null
+                        ? item.getSubtotal()
+                        : (item.getUnitPrice() != null && item.getQuantity() != null
+                                ? item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))
+                                : BigDecimal.ZERO);
                 sb.append("- ")
                         .append(item.getProductTitle())
                         .append(" — Talle ")
@@ -313,32 +336,18 @@ public class InquiryService {
                         .append(" — Cantidad: ")
                         .append(item.getQuantity())
                         .append(" — Precio unitario: ")
-                        .append(formatCurrency(item.getUnitPrice()))
+                        .append(CurrencyFormatter.formatUsd(item.getUnitPrice()))
+                        .append(" — Subtotal: ")
+                        .append(CurrencyFormatter.formatUsd(itemSubtotal))
                         .append("\n");
             }
         }
 
-        sb.append("\nTotal estimado: ").append(formatCurrency(inquiry.getTotalAmount())).append("\n\n");
+        sb.append("\nTotal estimado: ").append(CurrencyFormatter.formatUsd(inquiry.getTotalAmount())).append("\n\n");
         sb.append("¿Me confirman la disponibilidad y cómo continuar con la compra?");
 
         String encodedText = URLEncoder.encode(sb.toString(), StandardCharsets.UTF_8);
         return "https://wa.me/" + normalizedPhone + "?text=" + encodedText;
-    }
-
-    private String formatCurrency(BigDecimal amount) {
-        if (amount == null) {
-            return "$0";
-        }
-        DecimalFormatSymbols symbols = new DecimalFormatSymbols(Locale.forLanguageTag("es-AR"));
-        symbols.setGroupingSeparator('.');
-        symbols.setDecimalSeparator(',');
-        DecimalFormat df;
-        if (amount.stripTrailingZeros().scale() <= 0) {
-            df = new DecimalFormat("#,##0", symbols);
-        } else {
-            df = new DecimalFormat("#,##0.00", symbols);
-        }
-        return "$" + df.format(amount);
     }
 
     public InquiryResponse mapToResponse(Inquiry inquiry) {
