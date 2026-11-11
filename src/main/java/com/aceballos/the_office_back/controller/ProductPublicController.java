@@ -18,26 +18,28 @@ public class ProductPublicController {
     private final ProductService productService;
 
     /**
-     * Catálogo público paginado de productos activos con filtro opcional por categoría.
-     * Ejemplo: GET /api/products?categoryId=1&page=0&size=12&sort=price,asc
+     * Catálogo público paginado de productos activos con filtro opcional por categoría y marca.
+     * Ejemplo: GET /api/products?brand=jordan&categoryId=1&page=0&size=12&sort=price,asc
      */
     @GetMapping
     public ResponseEntity<Page<ProductResponse>> getActiveProducts(
             @RequestParam(name = "categoryId", required = false) Long categoryId,
+            @RequestParam(name = "brand", required = false) String brand,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.getActiveProducts(categoryId, pageable));
+        return ResponseEntity.ok(productService.getActiveProducts(categoryId, brand, pageable));
     }
 
     /**
-     * Búsqueda por título en el catálogo público con filtro opcional por categoría.
-     * Ejemplo: GET /api/products/search?title=remera&categoryId=2&page=0&size=12
+     * Búsqueda por título en el catálogo público con filtro opcional por categoría y marca.
+     * Ejemplo: GET /api/products/search?title=retro&brand=jordan&categoryId=1&page=0&size=12
      */
     @GetMapping("/search")
     public ResponseEntity<Page<ProductResponse>> searchProducts(
             @RequestParam(name = "title", required = false) String title,
             @RequestParam(name = "categoryId", required = false) Long categoryId,
+            @RequestParam(name = "brand", required = false) String brand,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.searchActiveProducts(title, categoryId, pageable));
+        return ResponseEntity.ok(productService.searchActiveProducts(title, categoryId, brand, pageable));
     }
 
     /**

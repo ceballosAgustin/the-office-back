@@ -73,6 +73,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/auth/password").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/brands/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/navigation/**").permitAll()
                         // Permitir registrar consultas comerciales públicas (sin descontar stock ni crear pedido)
                         .requestMatchers(HttpMethod.POST, "/api/inquiries").permitAll()
                         // Consultar estado de pedido por orderNumber sigue siendo público; crear órdenes directo requiere ADMIN

@@ -26,6 +26,10 @@ public class ProductResponse {
     private String categoryName;
     private String categorySlug;
 
+    private Long brandId;
+    private String brandName;
+    private String brandSlug;
+
     @Builder.Default
     private List<ProductImageResponse> images = new ArrayList<>();
 

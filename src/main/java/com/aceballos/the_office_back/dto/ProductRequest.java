@@ -38,6 +38,7 @@ public class ProductRequest {
     private Integer baseStock;
 
     private Long categoryId;
+    private Long brandId;
 
     @Valid
     private List<VariantDTO> variants;

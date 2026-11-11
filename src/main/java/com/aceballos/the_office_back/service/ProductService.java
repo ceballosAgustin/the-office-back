@@ -4,12 +4,14 @@ import com.aceballos.the_office_back.dto.ProductImageResponse;
 import com.aceballos.the_office_back.dto.ProductRequest;
 import com.aceballos.the_office_back.dto.ProductResponse;
 import com.aceballos.the_office_back.dto.VariantDTO;
+import com.aceballos.the_office_back.entity.Brand;
 import com.aceballos.the_office_back.entity.Category;
 import com.aceballos.the_office_back.entity.Product;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
+import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.InquiryRepository;
 import com.aceballos.the_office_back.repository.OrderItemRepository;
@@ -35,6 +37,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -46,6 +49,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final BrandRepository brandRepository;
     private final CloudinaryService cloudinaryService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
@@ -67,7 +71,8 @@ public class ProductService {
     }
 
     /**
-     * Crea un producto recibiendo el JSON serializado como String y una lista de archivos de imagen.
+     * Crea un producto recibiendo el JSON serializado como String y una lista de
+     * archivos de imagen.
      */
     @Transactional
     public ProductResponse createProduct(String productJson, List<MultipartFile> files) {
@@ -90,8 +95,21 @@ public class ProductService {
 
         if (request.getCategoryId() != null) {
             Category category = categoryRepository.findById(request.getCategoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Categoría no encontrada con ID: " + request.getCategoryId()));
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Categoría no encontrada con ID: " + request.getCategoryId()));
             product.setCategory(category);
+        }
+
+        if (request.getBrandId() != null) {
+            Brand brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(
+                            () -> new ResourceNotFoundException("Marca no encontrada con ID: " + request.getBrandId()));
+            if (!Boolean.TRUE.equals(brand.getIsActive())) {
+                throw new BusinessRuleException("La marca '" + brand.getName() + "' no se encuentra activa");
+            }
+            product.setBrand(brand);
+        } else {
+            product.setBrand(null);
         }
 
         if (request.getVariants() != null && !request.getVariants().isEmpty()) {
@@ -125,31 +143,40 @@ public class ProductService {
     }
 
     /**
-     * Lista productos activos paginados para el catálogo público (solo expone variantes activas).
+     * Lista productos activos paginados para el catálogo público (solo expone
+     * variantes activas).
      */
     @Transactional(readOnly = true)
     public Page<ProductResponse> getActiveProducts(Long categoryId, Pageable pageable) {
-        if (categoryId != null) {
-            return productRepository.findByIsActiveTrueAndCategoryId(categoryId, pageable)
-                    .map(this::mapToPublicResponse);
-        }
-        return productRepository.findByIsActiveTrue(pageable)
-                .map(this::mapToPublicResponse);
+        return getActiveProducts(categoryId, null, pageable);
     }
 
     /**
-     * Busca productos activos por título para el catálogo público (solo expone variantes activas).
+     * Lista productos activos paginados con filtro opcional por categoría y marca.
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductResponse> getActiveProducts(Long categoryId, String brandSlug, Pageable pageable) {
+        return searchActiveProducts(null, categoryId, brandSlug, pageable);
+    }
+
+    /**
+     * Busca productos activos por título para el catálogo público (solo expone
+     * variantes activas).
      */
     @Transactional(readOnly = true)
     public Page<ProductResponse> searchActiveProducts(String title, Long categoryId, Pageable pageable) {
-        if (title == null || title.trim().isEmpty()) {
-            return getActiveProducts(categoryId, pageable);
-        }
-        if (categoryId != null) {
-            return productRepository.findByTitleContainingIgnoreCaseAndIsActiveTrueAndCategoryId(title.trim(), categoryId, pageable)
-                    .map(this::mapToPublicResponse);
-        }
-        return productRepository.findByTitleContainingIgnoreCaseAndIsActiveTrue(title.trim(), pageable)
+        return searchActiveProducts(title, categoryId, null, pageable);
+    }
+
+    /**
+     * Busca productos activos combinando opcionalmente título, categoría y marca.
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductResponse> searchActiveProducts(String title, Long categoryId, String brandSlug,
+            Pageable pageable) {
+        String normalizedTitle = StringUtils.hasText(title) ? title.trim() : null;
+        String normalizedBrandSlug = StringUtils.hasText(brandSlug) ? brandSlug.trim().toLowerCase(Locale.ROOT) : null;
+        return productRepository.findActiveProducts(categoryId, normalizedBrandSlug, normalizedTitle, pageable)
                 .map(this::mapToPublicResponse);
     }
 
@@ -166,7 +193,8 @@ public class ProductService {
     }
 
     /**
-     * Listado administrativo paginado de productos activos e inactivos con filtros opcionales.
+     * Listado administrativo paginado de productos activos e inactivos con filtros
+     * opcionales.
      */
     @Transactional(readOnly = true)
     public Page<ProductResponse> getAdminProducts(Boolean isActive, Long categoryId, String title, Pageable pageable) {
@@ -176,7 +204,8 @@ public class ProductService {
     }
 
     /**
-     * Detalle administrativo de un producto por ID, incluyendo inactivos y todas sus variantes.
+     * Detalle administrativo de un producto por ID, incluyendo inactivos y todas
+     * sus variantes.
      */
     @Transactional(readOnly = true)
     public ProductResponse getAdminProductById(Long id) {
@@ -186,7 +215,8 @@ public class ProductService {
     }
 
     /**
-     * Actualiza un producto recibiendo el JSON serializado como String y lista de archivos opcional.
+     * Actualiza un producto recibiendo el JSON serializado como String y lista de
+     * archivos opcional.
      */
     @Transactional
     public ProductResponse updateProduct(Long id, String productJson, List<MultipartFile> files) {
@@ -195,8 +225,10 @@ public class ProductService {
     }
 
     /**
-     * Actualiza los datos de un producto, reconcilia sus variantes por ID sin perder referencias históricas,
-     * recalcula el stock general desde las variantes activas y agrega nuevas imágenes sin borrar las existentes.
+     * Actualiza los datos de un producto, reconcilia sus variantes por ID sin
+     * perder referencias históricas,
+     * recalcula el stock general desde las variantes activas y agrega nuevas
+     * imágenes sin borrar las existentes.
      */
     @Transactional
     public ProductResponse updateProduct(Long id, ProductRequest request, List<MultipartFile> files) {
@@ -211,8 +243,21 @@ public class ProductService {
 
         if (request.getCategoryId() != null) {
             Category category = categoryRepository.findById(request.getCategoryId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Categoría no encontrada con ID: " + request.getCategoryId()));
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Categoría no encontrada con ID: " + request.getCategoryId()));
             product.setCategory(category);
+        }
+
+        if (request.getBrandId() != null) {
+            Brand brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(
+                            () -> new ResourceNotFoundException("Marca no encontrada con ID: " + request.getBrandId()));
+            if (!Boolean.TRUE.equals(brand.getIsActive())) {
+                throw new BusinessRuleException("La marca '" + brand.getName() + "' no se encuentra activa");
+            }
+            product.setBrand(brand);
+        } else {
+            product.setBrand(null);
         }
 
         reconcileVariants(product, request.getVariants());
@@ -249,7 +294,8 @@ public class ProductService {
     }
 
     /**
-     * Borrado lógico: Cambia el estado isActive a false para preservar el historial.
+     * Borrado lógico: Cambia el estado isActive a false para preservar el
+     * historial.
      */
     @Transactional
     public void deleteProduct(Long id) {
@@ -261,8 +307,10 @@ public class ProductService {
 
     /**
      * Elimina una fotografía individual del producto.
-     * Si la imagen eliminada era la principal, asigna una nueva portada entre las restantes.
-     * La eliminación física en Cloudinary se ejecuta después del commit de la transacción SQL.
+     * Si la imagen eliminada era la principal, asigna una nueva portada entre las
+     * restantes.
+     * La eliminación física en Cloudinary se ejecuta después del commit de la
+     * transacción SQL.
      */
     @Transactional
     public ProductResponse deleteProductImage(Long productId, Long imageId) {
@@ -281,12 +329,14 @@ public class ProductService {
         product.getImages().remove(targetImage);
 
         // Ordenar y reindexar las imágenes restantes
-        product.getImages().sort(Comparator.comparing(img -> img.getOrderIndex() != null ? img.getOrderIndex() : Integer.MAX_VALUE));
+        product.getImages().sort(
+                Comparator.comparing(img -> img.getOrderIndex() != null ? img.getOrderIndex() : Integer.MAX_VALUE));
         for (int i = 0; i < product.getImages().size(); i++) {
             product.getImages().get(i).setOrderIndex(i);
         }
 
-        // Si se eliminó la imagen principal y quedan otras imágenes, asignar la primera como nueva portada
+        // Si se eliminó la imagen principal y quedan otras imágenes, asignar la primera
+        // como nueva portada
         if (wasPrimary && !product.getImages().isEmpty()) {
             boolean anyPrimary = product.getImages().stream().anyMatch(img -> Boolean.TRUE.equals(img.getIsPrimary()));
             if (!anyPrimary) {
@@ -302,7 +352,8 @@ public class ProductService {
     }
 
     /**
-     * Establece una imagen específica del producto como su fotografía principal (portada).
+     * Establece una imagen específica del producto como su fotografía principal
+     * (portada).
      */
     @Transactional
     public ProductResponse setPrimaryProductImage(Long productId, Long imageId) {
@@ -325,7 +376,8 @@ public class ProductService {
     }
 
     /**
-     * Reordena la galería de fotografías de un producto de acuerdo con la lista de IDs proporcionada.
+     * Reordena la galería de fotografías de un producto de acuerdo con la lista de
+     * IDs proporcionada.
      */
     @Transactional
     public ProductResponse reorderProductImages(Long productId, List<Long> orderedImageIds) {
@@ -390,7 +442,8 @@ public class ProductService {
                     String normalizedSize = vDto.getSize().trim().toUpperCase();
                     if (!activeSizesInRequest.add(normalizedSize)) {
                         throw new BusinessRuleException(
-                                "No se permiten variantes activas duplicadas para el mismo talle: " + vDto.getSize().trim());
+                                "No se permiten variantes activas duplicadas para el mismo talle: "
+                                        + vDto.getSize().trim());
                     }
                 }
             }
@@ -422,13 +475,15 @@ public class ProductService {
 
             if (vDto.getId() != null) {
                 if (!includedIds.add(vDto.getId())) {
-                    throw new BusinessRuleException("El ID de variante " + vDto.getId() + " está duplicado en la petición");
+                    throw new BusinessRuleException(
+                            "El ID de variante " + vDto.getId() + " está duplicado en la petición");
                 }
 
                 ProductVariant existing = existingById.get(vDto.getId());
                 if (existing == null) {
                     throw new BusinessRuleException(
-                            "La variante con ID " + vDto.getId() + " no pertenece al producto con ID " + product.getId());
+                            "La variante con ID " + vDto.getId() + " no pertenece al producto con ID "
+                                    + product.getId());
                 }
 
                 if (!existing.getSize().trim().equalsIgnoreCase(normalizedSize)) {
@@ -453,14 +508,16 @@ public class ProductService {
             }
         }
 
-        // Las variantes existentes omitidas en la colección se desactivan sin eliminarse físicamente
+        // Las variantes existentes omitidas en la colección se desactivan sin
+        // eliminarse físicamente
         for (ProductVariant existing : existingById.values()) {
             if (!includedIds.contains(existing.getId())) {
                 existing.setIsActive(false);
             }
         }
 
-        // Verificar que entre las variantes activas resultantes no queden talles duplicados
+        // Verificar que entre las variantes activas resultantes no queden talles
+        // duplicados
         Set<String> activeSizes = new HashSet<>();
         for (ProductVariant variant : product.getVariants()) {
             if (!Boolean.FALSE.equals(variant.getIsActive())) {
@@ -534,14 +591,17 @@ public class ProductService {
 
     private void cleanupUploadedImages(List<String> uploadedPublicIds) {
         for (String publicId : uploadedPublicIds) {
-            log.warn("Ejecutando limpieza compensatoria en Cloudinary para public_id '{}' tras fallo en persistencia", publicId);
+            log.warn("Ejecutando limpieza compensatoria en Cloudinary para public_id '{}' tras fallo en persistencia",
+                    publicId);
             cloudinaryService.deleteImage(publicId);
         }
     }
 
     private void schedulePostCommitCloudinaryDeletion(String publicId, Long imageId) {
         if (!StringUtils.hasText(publicId)) {
-            log.info("La imagen ID {} fue eliminada de la base de datos. No poseía public_id registrado, por lo que el archivo antiguo puede permanecer almacenado en Cloudinary.", imageId);
+            log.info(
+                    "La imagen ID {} fue eliminada de la base de datos. No poseía public_id registrado, por lo que el archivo antiguo puede permanecer almacenado en Cloudinary.",
+                    imageId);
             return;
         }
 
@@ -586,7 +646,8 @@ public class ProductService {
         List<ProductImageResponse> imageDTOs = new ArrayList<>();
         if (product.getImages() != null) {
             imageDTOs = product.getImages().stream()
-                    .sorted(Comparator.comparing(img -> img.getOrderIndex() != null ? img.getOrderIndex() : Integer.MAX_VALUE))
+                    .sorted(Comparator
+                            .comparing(img -> img.getOrderIndex() != null ? img.getOrderIndex() : Integer.MAX_VALUE))
                     .map(img -> ProductImageResponse.builder()
                             .id(img.getId())
                             .imageUrl(img.getImageUrl())
@@ -607,6 +668,9 @@ public class ProductService {
                 .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .categorySlug(product.getCategory() != null ? product.getCategory().getSlug() : null)
+                .brandId(product.getBrand() != null ? product.getBrand().getId() : null)
+                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .brandSlug(product.getBrand() != null ? product.getBrand().getSlug() : null)
                 .images(imageDTOs)
                 .variants(variantDTOs)
                 .build();

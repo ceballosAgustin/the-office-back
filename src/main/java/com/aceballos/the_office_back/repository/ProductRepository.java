@@ -3,6 +3,7 @@ package com.aceballos.the_office_back.repository;
 import com.aceballos.the_office_back.entity.Product;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,6 +20,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     long countByCategoryId(Long categoryId);
 
+    boolean existsByBrandId(Long brandId);
+
+    long countByBrandId(Long brandId);
+
     Page<Product> findByIsActiveTrue(Pageable pageable);
 
     Page<Product> findByIsActiveTrueAndCategoryId(Long categoryId, Pageable pageable);
@@ -32,9 +37,29 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Page<Product> findByTitleContainingIgnoreCaseAndIsActiveTrueAndCategoryId(String title, Long categoryId, Pageable pageable);
 
     /**
+     * Consulta pública paginada con EntityGraph para evitar consultas N+1 en category y brand.
+     * Soporta la combinación flexible de categoría, brand slug y búsqueda por título,
+     * garantizando que únicamente se devuelvan productos activos.
+     */
+    @EntityGraph(attributePaths = {"category", "brand"})
+    @Query("SELECT p FROM Product p " +
+            "LEFT JOIN p.category c " +
+            "LEFT JOIN p.brand b " +
+            "WHERE p.isActive = true AND " +
+            "(:categoryId IS NULL OR c.id = :categoryId) AND " +
+            "(:brandSlug IS NULL OR (b.slug = :brandSlug AND b.isActive = true)) AND " +
+            "(:title IS NULL OR LOWER(p.title) LIKE LOWER(CONCAT('%', :title, '%')))")
+    Page<Product> findActiveProducts(
+            @Param("categoryId") Long categoryId,
+            @Param("brandSlug") String brandSlug,
+            @Param("title") String title,
+            Pageable pageable);
+
+    /**
      * Consulta administrativa paginada que permite filtrar opcionalmente por estado activo/inactivo,
      * categoría y coincidencia parcial en el título.
      */
+    @EntityGraph(attributePaths = {"category", "brand"})
     @Query("SELECT p FROM Product p WHERE " +
             "(:isActive IS NULL OR p.isActive = :isActive) AND " +
             "(:categoryId IS NULL OR p.category.id = :categoryId) AND " +

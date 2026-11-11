@@ -7,6 +7,7 @@ import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.CategoryRepository;
+import com.aceballos.the_office_back.repository.NavItemRepository;
 import com.aceballos.the_office_back.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final ProductRepository productRepository;
+    private final NavItemRepository navItemRepository;
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getAllCategories() {
@@ -94,6 +96,7 @@ public class CategoryService {
                             + "' porque tiene productos asociados (" + Math.max(associatedProducts, 1) + ").");
         }
 
+        navItemRepository.deleteByCategoryId(id);
         categoryRepository.delete(category);
         log.info("Categoría ID={} ('{}') eliminada correctamente", category.getId(), category.getName());
     }

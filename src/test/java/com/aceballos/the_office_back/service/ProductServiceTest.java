@@ -3,12 +3,14 @@ package com.aceballos.the_office_back.service;
 import com.aceballos.the_office_back.dto.ProductRequest;
 import com.aceballos.the_office_back.dto.ProductResponse;
 import com.aceballos.the_office_back.dto.VariantDTO;
+import com.aceballos.the_office_back.entity.Brand;
 import com.aceballos.the_office_back.entity.Category;
 import com.aceballos.the_office_back.entity.Product;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
+import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.InquiryRepository;
 import com.aceballos.the_office_back.repository.OrderItemRepository;
@@ -46,6 +48,9 @@ class ProductServiceTest {
     private CategoryRepository categoryRepository;
 
     @Mock
+    private BrandRepository brandRepository;
+
+    @Mock
     private CloudinaryService cloudinaryService;
 
     @Mock
@@ -67,6 +72,7 @@ class ProductServiceTest {
         productService = new ProductService(
                 productRepository,
                 categoryRepository,
+                brandRepository,
                 cloudinaryService,
                 objectMapper,
                 validator,
@@ -382,6 +388,138 @@ class ProductServiceTest {
         // Reactivar el producto
         ProductResponse reactivated = productService.updateProductStatus(10L, true);
         assertTrue(reactivated.getIsActive());
+    }
+
+    @Test
+    void productBrand_CreateWithBrand_ShouldAssignBrandWhenActive() {
+        Brand nike = new Brand(1L, "Nike", "nike", true);
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(nike));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> {
+            Product p = inv.getArgument(0);
+            p.setId(30L);
+            return p;
+        });
+
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Nike Air")
+                .price(new BigDecimal("35000.00"))
+                .brandId(1L)
+                .variants(List.of(new VariantDTO(null, "M", 5, true)))
+                .build();
+
+        ProductResponse response = productService.createProduct(request, null);
+
+        assertNotNull(response);
+        assertEquals(30L, response.getId());
+        assertEquals(1L, response.getBrandId());
+        assertEquals("Nike", response.getBrandName());
+        assertEquals("nike", response.getBrandSlug());
+    }
+
+    @Test
+    void productBrand_CreateWithoutBrand_ShouldLeaveBrandAsNull() {
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> {
+            Product p = inv.getArgument(0);
+            p.setId(31L);
+            return p;
+        });
+
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Genérica Sin Marca")
+                .price(new BigDecimal("20000.00"))
+                .brandId(null)
+                .variants(List.of(new VariantDTO(null, "M", 5, true)))
+                .build();
+
+        ProductResponse response = productService.createProduct(request, null);
+
+        assertNotNull(response);
+        assertNull(response.getBrandId());
+        assertNull(response.getBrandName());
+        assertNull(response.getBrandSlug());
+        verifyNoInteractions(brandRepository);
+    }
+
+    @Test
+    void productBrand_WhenBrandNotFoundOrInactive_ShouldReject() {
+        // 1. Marca inexistente -> 404
+        when(brandRepository.findById(999L)).thenReturn(Optional.empty());
+        ProductRequest notFoundReq = ProductRequest.builder()
+                .title("Remera Test")
+                .price(new BigDecimal("25000.00"))
+                .brandId(999L)
+                .build();
+
+        assertThrows(ResourceNotFoundException.class, () -> productService.createProduct(notFoundReq, null));
+
+        // 2. Marca inactiva -> BusinessRuleException
+        Brand inactiveBrand = new Brand(2L, "Reebok", "reebok", false);
+        when(brandRepository.findById(2L)).thenReturn(Optional.of(inactiveBrand));
+        ProductRequest inactiveReq = ProductRequest.builder()
+                .title("Remera Reebok Inactiva")
+                .price(new BigDecimal("25000.00"))
+                .brandId(2L)
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> productService.createProduct(inactiveReq, null));
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void productBrand_UpdateBrandAndRemoveBrand_ShouldPreserveOrClearBrand() {
+        Brand adidas = new Brand(3L, "Adidas", "adidas", true);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(brandRepository.findById(3L)).thenReturn(Optional.of(adidas));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // 1. Asignar marca Adidas a existingProduct
+        ProductRequest assignRequest = ProductRequest.builder()
+                .title(existingProduct.getTitle())
+                .price(existingProduct.getPrice())
+                .brandId(3L)
+                .variants(List.of(new VariantDTO(101L, "M", 5, true), new VariantDTO(102L, "L", 10, true)))
+                .build();
+
+        ProductResponse assigned = productService.updateProduct(10L, assignRequest, null);
+        assertEquals(3L, assigned.getBrandId());
+        assertEquals("Adidas", assigned.getBrandName());
+        assertEquals("adidas", assigned.getBrandSlug());
+        assertNotNull(existingProduct.getBrand());
+
+        // 2. Quitar marca (enviar brandId = null) -> debe quedar sin marca
+        ProductRequest removeRequest = ProductRequest.builder()
+                .title(existingProduct.getTitle())
+                .price(existingProduct.getPrice())
+                .brandId(null)
+                .variants(List.of(new VariantDTO(101L, "M", 5, true), new VariantDTO(102L, "L", 10, true)))
+                .build();
+
+        ProductResponse removed = productService.updateProduct(10L, removeRequest, null);
+        assertNull(removed.getBrandId());
+        assertNull(removed.getBrandName());
+        assertNull(removed.getBrandSlug());
+        assertNull(existingProduct.getBrand());
+    }
+
+    @Test
+    void publicFiltering_ByBrandSlugAndCombiningWithCategoryAndSearch_ShouldDelegateToRepository() {
+        existingProduct.setBrand(new Brand(1L, "Nike", "nike", true));
+        when(productRepository.findActiveProducts(eq(1L), eq("nike"), eq("remera"), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> result = productService.searchActiveProducts(
+                "remera", 1L, "nike", PageRequest.of(0, 12));
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals(10L, result.getContent().get(0).getId());
+        assertEquals("nike", result.getContent().get(0).getBrandSlug());
+
+        // Verificación con mayúsculas/espacios que se normalizan
+        when(productRepository.findActiveProducts(eq(null), eq("nike"), eq(null), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> brandOnly = productService.getActiveProducts(null, " NIKE ", PageRequest.of(0, 12));
+        assertEquals(1, brandOnly.getTotalElements());
     }
 }
 

@@ -7,6 +7,7 @@ import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.CategoryRepository;
+import com.aceballos.the_office_back.repository.NavItemRepository;
 import com.aceballos.the_office_back.repository.ProductRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,11 +31,14 @@ class CategoryServiceTest {
     @Mock
     private ProductRepository productRepository;
 
+    @Mock
+    private NavItemRepository navItemRepository;
+
     private CategoryService categoryService;
 
     @BeforeEach
     void setUp() {
-        categoryService = new CategoryService(categoryRepository, productRepository);
+        categoryService = new CategoryService(categoryRepository, productRepository, navItemRepository);
     }
 
     @Test
@@ -144,6 +148,7 @@ class CategoryServiceTest {
 
         categoryService.deleteCategory(3L);
 
+        verify(navItemRepository, times(1)).deleteByCategoryId(3L);
         verify(categoryRepository).delete(existing);
     }
 
