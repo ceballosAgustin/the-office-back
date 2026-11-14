@@ -10,6 +10,7 @@ import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.NavItemRepository;
 import com.aceballos.the_office_back.repository.NavSectionRepository;
+import com.aceballos.the_office_back.repository.ProductRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ class NavigationServiceTest {
     @Mock
     private CategoryRepository categoryRepository;
 
+    @Mock
+    private ProductRepository productRepository;
+
     private NavigationService navigationService;
 
     @BeforeEach
@@ -48,7 +52,8 @@ class NavigationServiceTest {
                 navSectionRepository,
                 navItemRepository,
                 brandRepository,
-                categoryRepository
+                categoryRepository,
+                productRepository
         );
     }
 
@@ -485,7 +490,7 @@ class NavigationServiceTest {
         when(categoryRepository.findBySlug("accessories")).thenReturn(Optional.empty());
         when(categoryRepository.findBySlug("accesorios")).thenReturn(Optional.empty());
 
-        NavigationDataInitializer initializer = new NavigationDataInitializer(navSectionRepository, categoryRepository);
+        NavigationDataInitializer initializer = new NavigationDataInitializer(navSectionRepository, categoryRepository, productRepository);
         initializer.run(new DefaultApplicationArguments());
 
         ArgumentCaptor<NavSection> captor = ArgumentCaptor.forClass(NavSection.class);
@@ -515,10 +520,301 @@ class NavigationServiceTest {
     void test30_initializer_doesNotOverwriteExistingConfiguration() {
         when(navSectionRepository.count()).thenReturn(4L);
 
-        NavigationDataInitializer initializer = new NavigationDataInitializer(navSectionRepository, categoryRepository);
+        NavigationDataInitializer initializer = new NavigationDataInitializer(navSectionRepository, categoryRepository, productRepository);
         initializer.run(new DefaultApplicationArguments());
 
         verify(navSectionRepository, never()).save(any());
+    }
+
+    // =========================================================================
+    // PRUEBAS DE PRODUCT_FILTER (Escenarios 30 a 42)
+    // =========================================================================
+
+    @Test
+    @DisplayName("30. Crear PRODUCT_FILTER con categoría y género")
+    void test30_createProductFilter_CategoryAndGender_Success() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        Category cat = Category.builder().id(20L).name("Sneakers").slug("sneakers").build();
+
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+        when(categoryRepository.findById(20L)).thenReturn(Optional.of(cat));
+        when(navItemRepository.existsDuplicateProductFilter(2L, 20L, null, ProductGender.MEN)).thenReturn(false);
+        when(navItemRepository.save(any(NavItem.class))).thenAnswer(inv -> {
+            NavItem it = inv.getArgument(0);
+            it.setId(60L);
+            return it;
+        });
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Sneakers Men")
+                .categoryId(20L)
+                .gender(ProductGender.MEN)
+                .columnIndex(0)
+                .orderIndex(0)
+                .isVisible(true)
+                .build();
+
+        NavItemResponse response = navigationService.addItem(2L, request);
+        assertNotNull(response);
+        assertEquals(NavTargetType.PRODUCT_FILTER, response.getTargetType());
+        assertEquals("Sneakers Men", response.getLabel());
+        assertEquals(20L, response.getCategoryId());
+        assertEquals(ProductGender.MEN, response.getGender());
+        assertNull(response.getBrandId());
+    }
+
+    @Test
+    @DisplayName("31. Crear PRODUCT_FILTER con marca")
+    void test31_createProductFilter_Brand_Success() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        Brand brand = Brand.builder().id(100L).name("Nike").slug("nike").isActive(true).build();
+
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+        when(brandRepository.findById(100L)).thenReturn(Optional.of(brand));
+        when(navItemRepository.existsDuplicateProductFilter(2L, null, 100L, null)).thenReturn(false);
+        when(navItemRepository.save(any(NavItem.class))).thenAnswer(inv -> {
+            NavItem it = inv.getArgument(0);
+            it.setId(61L);
+            return it;
+        });
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Nike en Sneakers")
+                .brandId(100L)
+                .columnIndex(0)
+                .orderIndex(0)
+                .isVisible(true)
+                .build();
+
+        NavItemResponse response = navigationService.addItem(2L, request);
+        assertNotNull(response);
+        assertEquals(NavTargetType.PRODUCT_FILTER, response.getTargetType());
+        assertEquals(100L, response.getBrandId());
+    }
+
+    @Test
+    @DisplayName("32. Crear PRODUCT_FILTER con los tres criterios")
+    void test32_createProductFilter_AllCriteria_Success() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        Category cat = Category.builder().id(20L).name("Sneakers").slug("sneakers").build();
+        Brand brand = Brand.builder().id(100L).name("Nike").slug("nike").isActive(true).build();
+
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+        when(categoryRepository.findById(20L)).thenReturn(Optional.of(cat));
+        when(brandRepository.findById(100L)).thenReturn(Optional.of(brand));
+        when(navItemRepository.existsDuplicateProductFilter(2L, 20L, 100L, ProductGender.WOMEN)).thenReturn(false);
+        when(navItemRepository.save(any(NavItem.class))).thenAnswer(inv -> {
+            NavItem it = inv.getArgument(0);
+            it.setId(62L);
+            return it;
+        });
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Nike Sneakers Women")
+                .categoryId(20L)
+                .brandId(100L)
+                .gender(ProductGender.WOMEN)
+                .columnIndex(0)
+                .orderIndex(0)
+                .isVisible(true)
+                .build();
+
+        NavItemResponse response = navigationService.addItem(2L, request);
+        assertNotNull(response);
+        assertEquals(NavTargetType.PRODUCT_FILTER, response.getTargetType());
+        assertEquals(20L, response.getCategoryId());
+        assertEquals(100L, response.getBrandId());
+        assertEquals(ProductGender.WOMEN, response.getGender());
+    }
+
+    @Test
+    @DisplayName("33. Permitir PRODUCT_FILTER solamente con género")
+    void test33_createProductFilter_GenderOnly_Success() {
+        NavSection section = NavSection.builder().id(3L).code("streetwear").label("Streetwear").build();
+
+        when(navSectionRepository.findById(3L)).thenReturn(Optional.of(section));
+        when(navItemRepository.existsDuplicateProductFilter(3L, null, null, ProductGender.MEN)).thenReturn(false);
+        when(navItemRepository.save(any(NavItem.class))).thenAnswer(inv -> {
+            NavItem it = inv.getArgument(0);
+            it.setId(63L);
+            return it;
+        });
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Colección Hombre")
+                .gender(ProductGender.MEN)
+                .columnIndex(0)
+                .orderIndex(0)
+                .isVisible(true)
+                .build();
+
+        NavItemResponse response = navigationService.addItem(3L, request);
+        assertNotNull(response);
+        assertEquals(NavTargetType.PRODUCT_FILTER, response.getTargetType());
+        assertEquals(ProductGender.MEN, response.getGender());
+        assertNull(response.getCategoryId());
+        assertNull(response.getBrandId());
+    }
+
+    @Test
+    @DisplayName("34. Rechazar PRODUCT_FILTER sin criterios")
+    void test34_rejectProductFilter_WithoutCriteria() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Filtro Vacío")
+                .columnIndex(0)
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> navigationService.addItem(2L, request));
+    }
+
+    @Test
+    @DisplayName("35. Rechazar PRODUCT_FILTER con customUrl")
+    void test35_rejectProductFilter_WithCustomUrl() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Filtro con URL")
+                .gender(ProductGender.MEN)
+                .columnIndex(0)
+                .customUrl("https://theofficeba.com/filter")
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> navigationService.addItem(2L, request));
+    }
+
+    @Test
+    @DisplayName("36. Rechazar PRODUCT_FILTER con referencias inexistentes")
+    void test36_rejectProductFilter_NonExistentReferences() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+        when(categoryRepository.findById(999L)).thenReturn(Optional.empty());
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Inexistente")
+                .categoryId(999L)
+                .columnIndex(0)
+                .build();
+
+        assertThrows(ResourceNotFoundException.class, () -> navigationService.addItem(2L, request));
+    }
+
+    @Test
+    @DisplayName("37. Rechazar duplicados de la misma combinación")
+    void test37_rejectDuplicateProductFilter() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").build();
+        when(navSectionRepository.findById(2L)).thenReturn(Optional.of(section));
+        when(navItemRepository.existsDuplicateProductFilter(2L, null, null, ProductGender.MEN)).thenReturn(true);
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Duplicado")
+                .gender(ProductGender.MEN)
+                .columnIndex(0)
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> navigationService.addItem(2L, request));
+    }
+
+    @Test
+    @DisplayName("38. Conservar las restricciones de Brands: rechazar PRODUCT_FILTER en sección 'brands'")
+    void test38_rejectProductFilter_InBrandsSection() {
+        NavSection brandsSection = NavSection.builder().id(1L).code("brands").label("Marcas").build();
+        when(navSectionRepository.findById(1L)).thenReturn(Optional.of(brandsSection));
+
+        NavItemRequest request = NavItemRequest.builder()
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .label("Filtro en Brands")
+                .gender(ProductGender.MEN)
+                .columnIndex(0)
+                .build();
+
+        assertThrows(BusinessRuleException.class, () -> navigationService.addItem(1L, request));
+    }
+
+    @Test
+    @DisplayName("39 y 40. Navegación pública incluye PRODUCT_FILTER cuando hay productos y lo oculta cuando no hay")
+    void test39_test40_publicNavigation_FilterByActiveProducts() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").isVisible(true).items(new ArrayList<>()).build();
+
+        Category cat = Category.builder().id(20L).name("Sneakers").slug("sneakers").build();
+        NavItem itemWithProducts = NavItem.builder()
+                .id(1L)
+                .section(section)
+                .label("Con Productos")
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .category(cat)
+                .gender(ProductGender.MEN)
+                .isVisible(true)
+                .columnIndex(0)
+                .orderIndex(0)
+                .build();
+
+        NavItem itemWithoutProducts = NavItem.builder()
+                .id(2L)
+                .section(section)
+                .label("Sin Productos")
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .category(cat)
+                .gender(ProductGender.WOMEN)
+                .isVisible(true)
+                .columnIndex(0)
+                .orderIndex(1)
+                .build();
+
+        section.getItems().add(itemWithProducts);
+        section.getItems().add(itemWithoutProducts);
+
+        when(navSectionRepository.findVisibleSectionsWithItems()).thenReturn(List.of(section));
+
+        // Item 1 tiene productos activos coincidentes (MEN incluye MEN y UNISEX)
+        when(productRepository.existsActiveProductsByCriteria(eq(20L), isNull(), eq(true), eq(List.of(ProductGender.MEN, ProductGender.UNISEX))))
+                .thenReturn(true);
+        // Item 2 NO tiene productos activos coincidentes
+        when(productRepository.existsActiveProductsByCriteria(eq(20L), isNull(), eq(true), eq(List.of(ProductGender.WOMEN, ProductGender.UNISEX))))
+                .thenReturn(false);
+
+        List<PublicNavigationSectionResponse> publicNav = navigationService.getPublicNavigation();
+        assertNotNull(publicNav);
+        assertEquals(1, publicNav.size());
+        assertEquals(1, publicNav.get(0).getColumns().size());
+        assertEquals(1, publicNav.get(0).getColumns().get(0).getItems().size());
+        assertEquals("Con Productos", publicNav.get(0).getColumns().get(0).getItems().get(0).getLabel());
+    }
+
+    @Test
+    @DisplayName("41. GET /api/admin/navigation conserva toda la configuración, incluyendo elementos ocultos y sin productos")
+    void test41_adminNavigation_PreservesAllItems() {
+        NavSection section = NavSection.builder().id(2L).code("sneakers").label("Sneakers").isVisible(true).items(new ArrayList<>()).build();
+        NavItem hiddenItem = NavItem.builder()
+                .id(3L)
+                .section(section)
+                .label("Item Oculto")
+                .targetType(NavTargetType.PRODUCT_FILTER)
+                .gender(ProductGender.UNISEX)
+                .isVisible(false)
+                .columnIndex(0)
+                .orderIndex(0)
+                .build();
+        section.getItems().add(hiddenItem);
+
+        when(navSectionRepository.findAllSectionsWithItems()).thenReturn(List.of(section));
+
+        List<NavSectionResponse> adminNav = navigationService.getAllAdminSections();
+        assertEquals(1, adminNav.size());
+        assertEquals(1, adminNav.get(0).getItems().size());
+        assertEquals("Item Oculto", adminNav.get(0).getItems().get(0).getLabel());
+        assertFalse(adminNav.get(0).getItems().get(0).getIsVisible());
     }
 }
 

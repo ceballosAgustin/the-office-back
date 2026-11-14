@@ -1,5 +1,6 @@
 package com.aceballos.the_office_back.dto;
 
+import com.aceballos.the_office_back.entity.ProductGender;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -39,6 +40,7 @@ public class ProductRequest {
 
     private Long categoryId;
     private Long brandId;
+    private ProductGender gender;
 
     @Valid
     private List<VariantDTO> variants;

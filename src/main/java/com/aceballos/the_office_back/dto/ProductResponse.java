@@ -1,5 +1,6 @@
 package com.aceballos.the_office_back.dto;
 
+import com.aceballos.the_office_back.entity.ProductGender;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,6 +30,8 @@ public class ProductResponse {
     private Long brandId;
     private String brandName;
     private String brandSlug;
+
+    private ProductGender gender;
 
     @Builder.Default
     private List<ProductImageResponse> images = new ArrayList<>();

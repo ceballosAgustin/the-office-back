@@ -1,11 +1,13 @@
 package com.aceballos.the_office_back.service;
 
+import com.aceballos.the_office_back.dto.FilterOptionsResponse;
 import com.aceballos.the_office_back.dto.ProductRequest;
 import com.aceballos.the_office_back.dto.ProductResponse;
 import com.aceballos.the_office_back.dto.VariantDTO;
 import com.aceballos.the_office_back.entity.Brand;
 import com.aceballos.the_office_back.entity.Category;
 import com.aceballos.the_office_back.entity.Product;
+import com.aceballos.the_office_back.entity.ProductGender;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
@@ -15,6 +17,7 @@ import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.InquiryRepository;
 import com.aceballos.the_office_back.repository.OrderItemRepository;
 import com.aceballos.the_office_back.repository.ProductRepository;
+import com.aceballos.the_office_back.repository.ProductVariantRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validation;
@@ -45,6 +48,9 @@ class ProductServiceTest {
     private ProductRepository productRepository;
 
     @Mock
+    private ProductVariantRepository productVariantRepository;
+
+    @Mock
     private CategoryRepository categoryRepository;
 
     @Mock
@@ -71,6 +77,7 @@ class ProductServiceTest {
 
         productService = new ProductService(
                 productRepository,
+                productVariantRepository,
                 categoryRepository,
                 brandRepository,
                 cloudinaryService,
@@ -504,7 +511,7 @@ class ProductServiceTest {
     @Test
     void publicFiltering_ByBrandSlugAndCombiningWithCategoryAndSearch_ShouldDelegateToRepository() {
         existingProduct.setBrand(new Brand(1L, "Nike", "nike", true));
-        when(productRepository.findActiveProducts(eq(1L), eq("nike"), eq("remera"), any(PageRequest.class)))
+        when(productRepository.findActiveProducts(eq(1L), eq("nike"), eq("remera"), eq(false), anyList(), isNull(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(existingProduct)));
 
         Page<ProductResponse> result = productService.searchActiveProducts(
@@ -515,11 +522,216 @@ class ProductServiceTest {
         assertEquals("nike", result.getContent().get(0).getBrandSlug());
 
         // Verificación con mayúsculas/espacios que se normalizan
-        when(productRepository.findActiveProducts(eq(null), eq("nike"), eq(null), any(PageRequest.class)))
+        when(productRepository.findActiveProducts(isNull(), eq("nike"), isNull(), eq(false), anyList(), isNull(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(existingProduct)));
 
         Page<ProductResponse> brandOnly = productService.getActiveProducts(null, " NIKE ", PageRequest.of(0, 12));
         assertEquals(1, brandOnly.getTotalElements());
+    }
+
+    // =========================================================================
+    // PRUEBAS DE GÉNERO, FILTROS Y OPCIONES DINÁMICAS (Escenarios 1 a 29)
+    // =========================================================================
+
+    @Test
+    void test01_createProduct_WithoutGender_ShouldDefaultToUnisex() {
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Básica")
+                .description("Descripción")
+                .price(new BigDecimal("100.00"))
+                .categoryId(1L)
+                .variants(List.of(VariantDTO.builder().size("M").stock(5).build()))
+                .build();
+
+        Category cat = new Category(1L, "Remeras", "remeras");
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(cat));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product p = invocation.getArgument(0);
+            p.setId(20L);
+            return p;
+        });
+
+        ProductResponse response = productService.createProduct(request, null);
+        assertNotNull(response);
+        assertEquals(ProductGender.UNISEX, response.getGender());
+    }
+
+    @Test
+    void test02_createProduct_WithMenGender_ShouldSaveAsMen() {
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Men")
+                .description("Descripción")
+                .price(new BigDecimal("100.00"))
+                .categoryId(1L)
+                .gender(ProductGender.MEN)
+                .variants(List.of(VariantDTO.builder().size("M").stock(5).build()))
+                .build();
+
+        Category cat = new Category(1L, "Remeras", "remeras");
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(cat));
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> {
+            Product p = invocation.getArgument(0);
+            p.setId(21L);
+            return p;
+        });
+
+        ProductResponse response = productService.createProduct(request, null);
+        assertNotNull(response);
+        assertEquals(ProductGender.MEN, response.getGender());
+    }
+
+    @Test
+    void test03_updateProduct_WithoutGender_ShouldPreserveExistingGender() {
+        existingProduct.setGender(ProductGender.MEN);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductRequest updateReq = ProductRequest.builder()
+                .title("Remera Actualizada")
+                .price(new BigDecimal("200.00"))
+                .variants(List.of(VariantDTO.builder().size("M").stock(5).build()))
+                .build(); // gender es null
+
+        ProductResponse response = productService.updateProduct(10L, updateReq, null);
+        assertEquals(ProductGender.MEN, response.getGender());
+        assertEquals(ProductGender.MEN, existingProduct.getGender());
+    }
+
+    @Test
+    void test04_updateProduct_WithWomenGender_ShouldUpdateToWomen() {
+        existingProduct.setGender(ProductGender.MEN);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductRequest updateReq = ProductRequest.builder()
+                .title("Remera Actualizada")
+                .price(new BigDecimal("200.00"))
+                .gender(ProductGender.WOMEN)
+                .variants(List.of(VariantDTO.builder().size("M").stock(5).build()))
+                .build();
+
+        ProductResponse response = productService.updateProduct(10L, updateReq, null);
+        assertEquals(ProductGender.WOMEN, response.getGender());
+        assertEquals(ProductGender.WOMEN, existingProduct.getGender());
+    }
+
+    @Test
+    void test07_filterMen_ShouldIncludeMenAndUnisex() {
+        when(productRepository.findActiveProducts(isNull(), isNull(), isNull(), eq(true), eq(List.of(ProductGender.MEN, ProductGender.UNISEX)), isNull(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> page = productService.getActiveProducts(null, null, null, "MEN", null, PageRequest.of(0, 10));
+        assertEquals(1, page.getTotalElements());
+
+        // Verificamos case-insensitivity: "men" minúscula
+        Page<ProductResponse> pageLower = productService.getActiveProducts(null, null, null, "men", null, PageRequest.of(0, 10));
+        assertEquals(1, pageLower.getTotalElements());
+    }
+
+    @Test
+    void test08_filterWomen_ShouldIncludeWomenAndUnisex() {
+        when(productRepository.findActiveProducts(isNull(), isNull(), isNull(), eq(true), eq(List.of(ProductGender.WOMEN, ProductGender.UNISEX)), isNull(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> page = productService.getActiveProducts(null, null, null, "WOMEN", null, PageRequest.of(0, 10));
+        assertEquals(1, page.getTotalElements());
+    }
+
+    @Test
+    void test09_filterUnisex_ShouldIncludeOnlyUnisex() {
+        when(productRepository.findActiveProducts(isNull(), isNull(), isNull(), eq(true), eq(List.of(ProductGender.UNISEX)), isNull(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> page = productService.getActiveProducts(null, null, null, "UNISEX", null, PageRequest.of(0, 10));
+        assertEquals(1, page.getTotalElements());
+    }
+
+    @Test
+    void testFilterInvalidGender_ShouldThrowBusinessRuleException() {
+        assertThrows(BusinessRuleException.class, () ->
+                productService.getActiveProducts(null, null, null, "KIDS", null, PageRequest.of(0, 10))
+        );
+    }
+
+    @Test
+    void test10_test11_test12_combineCategoryBrandGenderAndSearch() {
+        Category cat = new Category(1L, "Sneakers", "sneakers");
+        when(categoryRepository.findBySlug("sneakers")).thenReturn(Optional.of(cat));
+        when(productRepository.findActiveProducts(eq(1L), eq("nike"), eq("dunk"), eq(true), eq(List.of(ProductGender.MEN, ProductGender.UNISEX)), eq("42"), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> result = productService.searchActiveProducts(
+                "dunk", null, "sneakers", "nike", "MEN", "42", PageRequest.of(0, 10)
+        );
+
+        assertEquals(1, result.getTotalElements());
+    }
+
+    @Test
+    void test13_filterByCategorySlug_ShouldResolveCategoryId() {
+        Category cat = new Category(2L, "Remeras", "remeras");
+        when(categoryRepository.findBySlug("remeras")).thenReturn(Optional.of(cat));
+        when(productRepository.findActiveProducts(eq(2L), isNull(), isNull(), eq(false), anyList(), isNull(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> result = productService.getActiveProducts(null, "remeras", null, null, null, PageRequest.of(0, 10));
+        assertEquals(1, result.getTotalElements());
+    }
+
+    @Test
+    void test14_maintainCompatibilityWithCategoryId() {
+        when(productRepository.findActiveProducts(eq(2L), isNull(), isNull(), eq(false), anyList(), isNull(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct)));
+
+        Page<ProductResponse> result = productService.getActiveProducts(2L, null, null, null, null, PageRequest.of(0, 10));
+        assertEquals(1, result.getTotalElements());
+    }
+
+    @Test
+    void test15_categoryAndCategoryIdMismatch_ShouldThrowBusinessRuleException() {
+        Category cat = new Category(1L, "Calzado", "calzado");
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(cat));
+
+        // categoryId=1 (slug=calzado) vs category=remeras (mismatch)
+        assertThrows(BusinessRuleException.class, () ->
+                productService.getActiveProducts(1L, "remeras", null, null, null, PageRequest.of(0, 10))
+        );
+    }
+
+    @Test
+    void testCategorySlugNotFound_ShouldReturnEmptyPageWithoutError() {
+        when(categoryRepository.findBySlug("inexistente")).thenReturn(Optional.empty());
+
+        Page<ProductResponse> result = productService.getActiveProducts(null, "inexistente", null, null, null, PageRequest.of(0, 10));
+        assertTrue(result.isEmpty());
+        assertEquals(0, result.getTotalElements());
+        verify(productRepository, never()).findActiveProducts(any(), any(), any(), anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    void test16_to_23_variantSizeFilter_NormalizedAndPassedToRepository() {
+        when(productRepository.findActiveProducts(isNull(), isNull(), isNull(), eq(false), anyList(), eq("42"), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(existingProduct), PageRequest.of(0, 10), 1));
+
+        Page<ProductResponse> result = productService.getActiveProducts(null, null, null, null, " 42 ", PageRequest.of(0, 10));
+        assertEquals(1, result.getTotalElements());
+        assertEquals(1, result.getContent().size());
+    }
+
+    @Test
+    void test24_to_29_getFilterOptions_ReturnsSizesSortedDeterministically() {
+        Category cat = new Category(1L, "Sneakers", "sneakers");
+        when(categoryRepository.findBySlug("sneakers")).thenReturn(Optional.of(cat));
+
+        when(productVariantRepository.findAvailableSizesByFilters(
+                eq(1L), eq("nike"), eq("dunk"), eq(true), eq(List.of(ProductGender.MEN, ProductGender.UNISEX))
+        )).thenReturn(List.of("42", "40", "XL", "S", "M", "39.5", "41", "XS", "38"));
+
+        FilterOptionsResponse response = productService.getFilterOptions(null, "sneakers", "nike", "MEN", "dunk");
+        assertNotNull(response);
+        // Debe ordenar determinísticamente: numéricos 38, 39.5, 40, 41, 42 luego ropa XS, S, M, XL
+        List<String> expected = List.of("38", "39.5", "40", "41", "42", "XS", "S", "M", "XL");
+        assertEquals(expected, response.getAvailableSizes());
     }
 }
 

@@ -1,6 +1,7 @@
 package com.aceballos.the_office_back.dto;
 
 import com.aceballos.the_office_back.entity.NavTargetType;
+import com.aceballos.the_office_back.entity.ProductGender;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -20,6 +21,8 @@ public class NavItemRequest {
     private Long brandId;
 
     private Long categoryId;
+
+    private ProductGender gender;
 
     @Size(max = 500, message = "La URL no puede superar los 500 caracteres")
     private String customUrl;

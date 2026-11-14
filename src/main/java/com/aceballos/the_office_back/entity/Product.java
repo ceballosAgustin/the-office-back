@@ -15,7 +15,9 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "products")
+@Table(name = "products", indexes = {
+        @Index(name = "idx_products_active_gender", columnList = "is_active, gender")
+})
 public class Product {
 
     @Id
@@ -36,6 +38,10 @@ public class Product {
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gender", nullable = false, length = 20, columnDefinition = "varchar(20) default 'UNISEX'")
+    private ProductGender gender = ProductGender.UNISEX;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")

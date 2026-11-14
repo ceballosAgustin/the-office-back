@@ -6,6 +6,7 @@ import com.aceballos.the_office_back.entity.Category;
 import com.aceballos.the_office_back.entity.NavItem;
 import com.aceballos.the_office_back.entity.NavSection;
 import com.aceballos.the_office_back.entity.NavTargetType;
+import com.aceballos.the_office_back.entity.ProductGender;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
@@ -13,6 +14,7 @@ import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.NavItemRepository;
 import com.aceballos.the_office_back.repository.NavSectionRepository;
+import com.aceballos.the_office_back.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,10 +39,12 @@ public class NavigationService {
     private final NavItemRepository navItemRepository;
     private final BrandRepository brandRepository;
     private final CategoryRepository categoryRepository;
+    private final ProductRepository productRepository;
 
     /**
      * Devuelve el árbol público de navegación: solo secciones e ítems visibles,
-     * agrupados por columnas y con destinos válidos (marcas activas con productos activos).
+     * agrupados por columnas y con destinos válidos (marcas activas con productos
+     * activos).
      */
     @Transactional(readOnly = true)
     public List<PublicNavigationSectionResponse> getPublicNavigation() {
@@ -62,8 +66,7 @@ public class NavigationService {
                     .collect(Collectors.groupingBy(
                             NavItem::getColumnIndex,
                             TreeMap::new,
-                            Collectors.toList()
-                    ));
+                            Collectors.toList()));
 
             List<PublicNavigationColumnResponse> columns = new ArrayList<>();
             for (Map.Entry<Integer, List<NavItem>> entry : itemsByColumn.entrySet()) {
@@ -99,11 +102,41 @@ public class NavigationService {
                     && validBrandIds.contains(item.getBrand().getId());
             case CATEGORY -> item.getCategory() != null;
             case CUSTOM_LINK -> StringUtils.hasText(item.getCustomUrl());
+            case PRODUCT_FILTER -> isValidProductFilter(item);
         };
     }
 
+    private boolean isValidProductFilter(NavItem item) {
+        Long catId = item.getCategory() != null ? item.getCategory().getId() : null;
+        Long bId = item.getBrand() != null ? item.getBrand().getId() : null;
+        ProductGender gen = item.getGender();
+
+        if (catId == null && bId == null && gen == null) {
+            return false;
+        }
+
+        if (item.getBrand() != null && !Boolean.TRUE.equals(item.getBrand().getIsActive())) {
+            return false;
+        }
+
+        boolean hasGenderFilter = gen != null;
+        List<ProductGender> genders;
+        if (!hasGenderFilter) {
+            genders = List.of(ProductGender.UNISEX);
+        } else {
+            genders = switch (gen) {
+                case MEN -> List.of(ProductGender.MEN, ProductGender.UNISEX);
+                case WOMEN -> List.of(ProductGender.WOMEN, ProductGender.UNISEX);
+                case UNISEX -> List.of(ProductGender.UNISEX);
+            };
+        }
+
+        return productRepository.existsActiveProductsByCriteria(catId, bId, hasGenderFilter, genders);
+    }
+
     private PublicNavigationItemResponse mapToPublicItemResponse(NavItem item) {
-        PublicNavigationItemResponse.PublicNavigationItemResponseBuilder builder = PublicNavigationItemResponse.builder()
+        PublicNavigationItemResponse.PublicNavigationItemResponseBuilder builder = PublicNavigationItemResponse
+                .builder()
                 .id(item.getId())
                 .targetType(item.getTargetType())
                 .orderIndex(item.getOrderIndex());
@@ -127,6 +160,22 @@ public class NavigationService {
             case CUSTOM_LINK -> {
                 builder.label(item.getLabel())
                         .customUrl(item.getCustomUrl());
+            }
+            case PRODUCT_FILTER -> {
+                builder.label(item.getLabel())
+                        .gender(item.getGender());
+                if (item.getBrand() != null) {
+                    Brand brand = item.getBrand();
+                    builder.brandId(brand.getId())
+                            .brandName(brand.getName())
+                            .brandSlug(brand.getSlug());
+                }
+                if (item.getCategory() != null) {
+                    Category cat = item.getCategory();
+                    builder.categoryId(cat.getId())
+                            .categoryName(cat.getName())
+                            .categorySlug(cat.getSlug());
+                }
             }
         }
 
@@ -292,7 +341,8 @@ public class NavigationService {
     @Transactional
     public NavItemResponse addItem(Long sectionId, NavItemRequest request) {
         NavSection section = navSectionRepository.findById(sectionId)
-                .orElseThrow(() -> new ResourceNotFoundException("Sección de navegación no encontrada con ID: " + sectionId));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Sección de navegación no encontrada con ID: " + sectionId));
 
         if (request == null || request.getTargetType() == null) {
             throw new BusinessRuleException("El tipo de destino es obligatorio");
@@ -305,6 +355,9 @@ public class NavigationService {
         }
 
         if (isBrandsSection) {
+            if (request.getTargetType() != NavTargetType.BRAND) {
+                throw new BusinessRuleException("La sección de marcas solo admite elementos de tipo BRAND");
+            }
             if (columnIndex != 0 && columnIndex != 1) {
                 throw new BusinessRuleException("La sección de marcas solo admite las columnas 0 y 1");
             }
@@ -359,11 +412,15 @@ public class NavigationService {
         boolean targetVisible = request.getIsVisible() != null ? request.getIsVisible() : item.getIsVisible();
 
         if (isBrandsSection) {
+            if (request.getTargetType() != NavTargetType.BRAND) {
+                throw new BusinessRuleException("La sección de marcas solo admite elementos de tipo BRAND");
+            }
             if (targetCol != 0 && targetCol != 1) {
                 throw new BusinessRuleException("La sección de marcas solo admite las columnas 0 y 1");
             }
             if (targetVisible && request.getTargetType() == NavTargetType.BRAND) {
-                long totalVisibleExcl = navItemRepository.countVisibleBrandsBySectionIdExcludingItem(section.getId(), id);
+                long totalVisibleExcl = navItemRepository.countVisibleBrandsBySectionIdExcludingItem(section.getId(),
+                        id);
                 if (totalVisibleExcl >= MAX_VISIBLE_BRANDS_TOTAL) {
                     throw new ResourceConflictException("La sección de marcas no puede tener más de "
                             + MAX_VISIBLE_BRANDS_TOTAL + " marcas visibles");
@@ -417,7 +474,8 @@ public class NavigationService {
                         section.getId(), item.getColumnIndex());
                 if (colVisible >= MAX_VISIBLE_BRANDS_PER_COLUMN) {
                     throw new ResourceConflictException("No se pueden tener más de "
-                            + MAX_VISIBLE_BRANDS_PER_COLUMN + " marcas visibles en la columna " + item.getColumnIndex());
+                            + MAX_VISIBLE_BRANDS_PER_COLUMN + " marcas visibles en la columna "
+                            + item.getColumnIndex());
                 }
             }
         }
@@ -440,7 +498,8 @@ public class NavigationService {
     @Transactional
     public List<NavItemResponse> reorderItems(Long sectionId, ReorderItemsRequest request) {
         NavSection section = navSectionRepository.findById(sectionId)
-                .orElseThrow(() -> new ResourceNotFoundException("Sección de navegación no encontrada con ID: " + sectionId));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Sección de navegación no encontrada con ID: " + sectionId));
 
         if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
             throw new BusinessRuleException("La lista de elementos a reordenar es obligatoria");
@@ -455,7 +514,8 @@ public class NavigationService {
         }
 
         List<NavItem> sectionItems = navItemRepository.findBySectionIdOrderByColumnIndexAscOrderIndexAsc(sectionId);
-        Map<Long, NavItem> itemMap = sectionItems.stream().collect(Collectors.toMap(NavItem::getId, Function.identity()));
+        Map<Long, NavItem> itemMap = sectionItems.stream()
+                .collect(Collectors.toMap(NavItem::getId, Function.identity()));
 
         for (OrderItemPosition pos : positions) {
             if (!itemMap.containsKey(pos.getId())) {
@@ -508,11 +568,14 @@ public class NavigationService {
                 if (request.getBrandId() == null) {
                     throw new BusinessRuleException("El ID de la marca es obligatorio para el destino BRAND");
                 }
-                if (request.getCategoryId() != null || StringUtils.hasText(request.getCustomUrl())) {
-                    throw new BusinessRuleException("Un elemento de tipo BRAND no debe tener category ni customUrl");
+                if (request.getCategoryId() != null || StringUtils.hasText(request.getCustomUrl())
+                        || request.getGender() != null) {
+                    throw new BusinessRuleException(
+                            "Un elemento de tipo BRAND no debe tener category, customUrl ni gender");
                 }
                 Brand brand = brandRepository.findById(request.getBrandId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Marca no encontrada con ID: " + request.getBrandId()));
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Marca no encontrada con ID: " + request.getBrandId()));
 
                 boolean duplicate = currentItemId != null
                         ? navItemRepository.existsBySectionIdAndBrandIdAndIdNot(sectionId, brand.getId(), currentItemId)
@@ -524,6 +587,7 @@ public class NavigationService {
 
                 item.setBrand(brand);
                 item.setCategory(null);
+                item.setGender(null);
                 item.setCustomUrl(null);
                 item.setLabel(null);
             }
@@ -531,14 +595,18 @@ public class NavigationService {
                 if (request.getCategoryId() == null) {
                     throw new BusinessRuleException("El ID de la categoría es obligatorio para el destino CATEGORY");
                 }
-                if (request.getBrandId() != null || StringUtils.hasText(request.getCustomUrl())) {
-                    throw new BusinessRuleException("Un elemento de tipo CATEGORY no debe tener brand ni customUrl");
+                if (request.getBrandId() != null || StringUtils.hasText(request.getCustomUrl())
+                        || request.getGender() != null) {
+                    throw new BusinessRuleException(
+                            "Un elemento de tipo CATEGORY no debe tener brand, customUrl ni gender");
                 }
                 Category category = categoryRepository.findById(request.getCategoryId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Categoría no encontrada con ID: " + request.getCategoryId()));
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Categoría no encontrada con ID: " + request.getCategoryId()));
 
                 boolean duplicate = currentItemId != null
-                        ? navItemRepository.existsBySectionIdAndCategoryIdAndIdNot(sectionId, category.getId(), currentItemId)
+                        ? navItemRepository.existsBySectionIdAndCategoryIdAndIdNot(sectionId, category.getId(),
+                                currentItemId)
                         : navItemRepository.existsBySectionIdAndCategoryId(sectionId, category.getId());
 
                 if (duplicate) {
@@ -547,12 +615,14 @@ public class NavigationService {
 
                 item.setCategory(category);
                 item.setBrand(null);
+                item.setGender(null);
                 item.setCustomUrl(null);
                 item.setLabel(StringUtils.hasText(request.getLabel()) ? request.getLabel().trim() : null);
             }
             case CUSTOM_LINK -> {
-                if (request.getBrandId() != null || request.getCategoryId() != null) {
-                    throw new BusinessRuleException("Un elemento de tipo CUSTOM_LINK no debe tener brand ni category");
+                if (request.getBrandId() != null || request.getCategoryId() != null || request.getGender() != null) {
+                    throw new BusinessRuleException(
+                            "Un elemento de tipo CUSTOM_LINK no debe tener brand, category ni gender");
                 }
                 if (!StringUtils.hasText(request.getLabel())) {
                     throw new BusinessRuleException("La etiqueta es obligatoria para un enlace personalizado");
@@ -561,8 +631,59 @@ public class NavigationService {
 
                 item.setBrand(null);
                 item.setCategory(null);
+                item.setGender(null);
                 item.setLabel(request.getLabel().trim());
                 item.setCustomUrl(request.getCustomUrl().trim());
+            }
+            case PRODUCT_FILTER -> {
+                if (request.getCategoryId() == null && request.getBrandId() == null && request.getGender() == null) {
+                    throw new BusinessRuleException(
+                            "Un elemento de tipo PRODUCT_FILTER debe definir al menos un criterio entre categoría, marca o género");
+                }
+                if (!StringUtils.hasText(request.getLabel())) {
+                    throw new BusinessRuleException("La etiqueta es obligatoria para un filtro de productos");
+                }
+                if (StringUtils.hasText(request.getCustomUrl())) {
+                    throw new BusinessRuleException("Un elemento de tipo PRODUCT_FILTER no debe tener customUrl");
+                }
+
+                Category category = null;
+                if (request.getCategoryId() != null) {
+                    category = categoryRepository.findById(request.getCategoryId())
+                            .orElseThrow(() -> new ResourceNotFoundException(
+                                    "Categoría no encontrada con ID: " + request.getCategoryId()));
+                }
+
+                Brand brand = null;
+                if (request.getBrandId() != null) {
+                    brand = brandRepository.findById(request.getBrandId())
+                            .orElseThrow(() -> new ResourceNotFoundException(
+                                    "Marca no encontrada con ID: " + request.getBrandId()));
+                    if (!Boolean.TRUE.equals(brand.getIsActive())) {
+                        throw new BusinessRuleException("La marca '" + brand.getName() + "' no se encuentra activa");
+                    }
+                }
+
+                ProductGender gender = request.getGender();
+
+                Long catId = category != null ? category.getId() : null;
+                Long bId = brand != null ? brand.getId() : null;
+
+                boolean duplicate = currentItemId != null
+                        ? navItemRepository.existsDuplicateProductFilterExcludingId(sectionId, catId, bId, gender,
+                                currentItemId)
+                        : navItemRepository.existsDuplicateProductFilter(sectionId, catId, bId, gender);
+
+                if (duplicate) {
+                    throw new ResourceConflictException(
+                            "Ya existe un filtro de productos con la misma combinación en esta sección");
+                }
+
+                item.setCategory(category);
+                item.setBrand(brand);
+                item.setGender(gender);
+                item.setLabel(request.getLabel().trim());
+                item.setCustomUrl(null);
             }
         }
     }
@@ -576,7 +697,8 @@ public class NavigationService {
             throw new BusinessRuleException("La URL personalizada no puede superar los 500 caracteres");
         }
         String lower = trimmed.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("vbscript:") || lower.startsWith("file:")) {
+        if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("vbscript:")
+                || lower.startsWith("file:")) {
             throw new BusinessRuleException("La URL personalizada no es segura o contiene un protocolo no permitido");
         }
         if (trimmed.startsWith("/")) {
@@ -586,16 +708,17 @@ public class NavigationService {
         } else if (lower.startsWith("https://")) {
             // URL externa válida con HTTPS
         } else {
-            throw new BusinessRuleException("Las URLs externas deben utilizar HTTPS y las rutas internas deben comenzar con /");
+            throw new BusinessRuleException(
+                    "Las URLs externas deben utilizar HTTPS y las rutas internas deben comenzar con /");
         }
     }
 
     public NavSectionResponse mapToSectionResponse(NavSection section) {
         List<NavItemResponse> items = section.getItems() != null
                 ? section.getItems().stream()
-                .sorted(Comparator.comparing(NavItem::getColumnIndex).thenComparing(NavItem::getOrderIndex))
-                .map(this::mapToItemResponse)
-                .collect(Collectors.toList())
+                        .sorted(Comparator.comparing(NavItem::getColumnIndex).thenComparing(NavItem::getOrderIndex))
+                        .map(this::mapToItemResponse)
+                        .collect(Collectors.toList())
                 : Collections.emptyList();
 
         return NavSectionResponse.builder()
@@ -633,9 +756,24 @@ public class NavigationService {
                     .label(StringUtils.hasText(item.getLabel()) ? item.getLabel() : c.getName());
         } else if (item.getTargetType() == NavTargetType.CUSTOM_LINK) {
             builder.label(item.getLabel());
+        } else if (item.getTargetType() == NavTargetType.PRODUCT_FILTER) {
+            builder.label(item.getLabel())
+                    .gender(item.getGender());
+            if (item.getBrand() != null) {
+                Brand b = item.getBrand();
+                builder.brandId(b.getId())
+                        .brandName(b.getName())
+                        .brandSlug(b.getSlug())
+                        .brandIsActive(b.getIsActive());
+            }
+            if (item.getCategory() != null) {
+                Category c = item.getCategory();
+                builder.categoryId(c.getId())
+                        .categoryName(c.getName())
+                        .categorySlug(c.getSlug());
+            }
         }
 
         return builder.build();
     }
 }
-

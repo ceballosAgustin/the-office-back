@@ -38,11 +38,14 @@ public class AuthController {
 
     /**
      * One-Time Setup: crea el primer administrador del sistema.
+     * Requiere el encabezado X-Admin-Setup-Token con el token de inicialización configurado.
      * Una vez que ya existe al menos un ADMIN, este endpoint devuelve 400.
      */
     @PostMapping("/setup-admin")
-    public ResponseEntity<RegisterResponse> setupFirstAdmin(@Valid @RequestBody RegisterRequest registerRequest) {
-        RegisterResponse response = authService.setupFirstAdmin(registerRequest);
+    public ResponseEntity<RegisterResponse> setupFirstAdmin(
+            @RequestHeader(value = "X-Admin-Setup-Token", required = false) String setupToken,
+            @Valid @RequestBody RegisterRequest registerRequest) {
+        RegisterResponse response = authService.setupFirstAdmin(registerRequest, setupToken);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

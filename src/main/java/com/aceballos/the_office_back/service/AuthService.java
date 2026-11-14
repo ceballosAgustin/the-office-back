@@ -13,6 +13,7 @@ import com.aceballos.the_office_back.repository.UserRepository;
 import com.aceballos.the_office_back.security.JwtUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -21,6 +22,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Slf4j
 @Service
@@ -31,6 +36,12 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
+
+    @Value("${app.auth.admin-setup-token:}")
+    private String adminSetupToken;
+
+    @Value("${app.auth.registration-enabled:true}")
+    private boolean registrationEnabled;
 
     /**
      * Autentica credenciales, establece el contexto de seguridad y genera el token JWT.
@@ -59,9 +70,14 @@ public class AuthService {
     /**
      * Registro público: siempre asigna ROLE_USER, ignorando cualquier payload
      * que intente elevar privilegios.
+     * Puede deshabilitarse mediante app.auth.registration-enabled=false.
      */
     @Transactional
     public RegisterResponse register(RegisterRequest registerRequest) {
+        if (!registrationEnabled) {
+            throw new BusinessRuleException("El registro público de usuarios se encuentra deshabilitado");
+        }
+
         if (userRepository.existsByUsername(registerRequest.getUsername())) {
             throw new IllegalArgumentException(
                     "El nombre de usuario '" + registerRequest.getUsername() + "' ya está en uso");
@@ -83,15 +99,34 @@ public class AuthService {
     }
 
     /**
-     * One-Time Setup: crea el primer administrador solo si no existe ninguno aún.
-     * Una vez creado, este endpoint se vuelve inoperante.
+     * One-Time Setup: crea el primer administrador solo si no existe ninguno aún
+     * y si se proporciona el token de inicialización X-Admin-Setup-Token válido.
+     * Una vez creado el primer ADMIN, este endpoint queda permanentemente deshabilitado.
      */
     @Transactional
-    public RegisterResponse setupFirstAdmin(RegisterRequest registerRequest) {
+    public RegisterResponse setupFirstAdmin(RegisterRequest registerRequest, String setupToken) {
         long adminCount = userRepository.countByRole(Role.ADMIN);
         if (adminCount > 0) {
             throw new BusinessRuleException(
                     "Ya existe un administrador configurado. Este endpoint está deshabilitado.");
+        }
+
+        if (!StringUtils.hasText(adminSetupToken)) {
+            throw new BusinessRuleException(
+                    "El endpoint de inicialización de administrador no se encuentra habilitado.");
+        }
+
+        if (!StringUtils.hasText(setupToken)) {
+            throw new BusinessRuleException(
+                    "Token de inicialización de administrador no proporcionado o inválido.");
+        }
+
+        byte[] expectedBytes = adminSetupToken.trim().getBytes(StandardCharsets.UTF_8);
+        byte[] providedBytes = setupToken.trim().getBytes(StandardCharsets.UTF_8);
+
+        if (!MessageDigest.isEqual(expectedBytes, providedBytes)) {
+            throw new BusinessRuleException(
+                    "Token de inicialización de administrador no proporcionado o inválido.");
         }
 
         if (userRepository.existsByUsername(registerRequest.getUsername())) {
@@ -112,6 +147,10 @@ public class AuthService {
                 .username(admin.getUsername())
                 .role(admin.getRole().name())
                 .build();
+    }
+
+    public RegisterResponse setupFirstAdmin(RegisterRequest registerRequest) {
+        return setupFirstAdmin(registerRequest, null);
     }
 
     /**

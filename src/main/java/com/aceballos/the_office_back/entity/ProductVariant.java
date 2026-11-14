@@ -12,7 +12,9 @@ import lombok.EqualsAndHashCode;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "product_variants")
+@Table(name = "product_variants", indexes = {
+        @Index(name = "idx_variants_prod_act_stk_sz", columnList = "product_id, is_active, stock, size")
+})
 public class ProductVariant {
 
     @Id

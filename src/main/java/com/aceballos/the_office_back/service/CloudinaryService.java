@@ -4,6 +4,7 @@ import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,6 +18,9 @@ import java.util.Map;
 public class CloudinaryService {
 
     private final Cloudinary cloudinary;
+
+    @Value("${cloudinary.folder:the-office/products}")
+    private String cloudinaryFolder = "the-office/products";
 
     public record CloudinaryUploadResult(String imageUrl, String publicId) {}
 
@@ -32,10 +36,11 @@ public class CloudinaryService {
         }
 
         try {
+            String folder = StringUtils.hasText(cloudinaryFolder) ? cloudinaryFolder.trim() : "the-office/products";
             Map<String, Object> uploadResult = cloudinary.uploader().upload(
                     file.getBytes(),
                     ObjectUtils.asMap(
-                            "folder", "the-office/products",
+                            "folder", folder,
                             "resource_type", "auto"
                     )
             );

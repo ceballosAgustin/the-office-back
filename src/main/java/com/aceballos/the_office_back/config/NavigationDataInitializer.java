@@ -6,6 +6,7 @@ import com.aceballos.the_office_back.entity.NavSection;
 import com.aceballos.the_office_back.entity.NavTargetType;
 import com.aceballos.the_office_back.repository.CategoryRepository;
 import com.aceballos.the_office_back.repository.NavSectionRepository;
+import com.aceballos.the_office_back.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -23,10 +24,16 @@ public class NavigationDataInitializer implements ApplicationRunner {
 
     private final NavSectionRepository navSectionRepository;
     private final CategoryRepository categoryRepository;
+    private final ProductRepository productRepository;
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        int updatedProducts = productRepository.updateNullGenderToUnisex();
+        if (updatedProducts > 0) {
+            log.info("NavigationDataInitializer: Se actualizaron {} productos existentes sin género asignado a UNISEX.", updatedProducts);
+        }
+
         if (navSectionRepository.count() > 0) {
             log.info("NavigationDataInitializer: Configuración de navegación existente encontrada. Omitiendo inicialización.");
             return;

@@ -32,6 +32,10 @@ public class NavItem {
     @JoinColumn(name = "category_id")
     private Category category;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gender", length = 20)
+    private ProductGender gender;
+
     @Column(name = "custom_url", length = 500)
     private String customUrl;
 

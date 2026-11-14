@@ -1,6 +1,7 @@
 package com.aceballos.the_office_back.dto;
 
 import com.aceballos.the_office_back.entity.NavTargetType;
+import com.aceballos.the_office_back.entity.ProductGender;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -26,6 +27,8 @@ public class PublicNavigationItemResponse {
     private Long categoryId;
     private String categoryName;
     private String categorySlug;
+
+    private ProductGender gender;
 
     private String customUrl;
 }
