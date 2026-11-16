@@ -350,34 +350,32 @@ public class ProductService {
         }
         clean = clean.replace(',', '.');
 
-        if (!clean.matches("^\\d+(\\.\\d+)?$")) {
-            throw new BusinessRuleException(
-                    "El talle de calzado '" + rawSize.trim() + "' no es un valor numérico válido. Debe ser un número mayor a 0 (ej: 7, 7.5, 8, 8.5)");
+        if (clean.matches("^\\d+(\\.\\d+)?$")) {
+            BigDecimal value;
+            try {
+                value = new BigDecimal(clean);
+                if (value.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new BusinessRuleException("El talle de calzado debe ser mayor a cero: " + rawSize.trim());
+                }
+                BigDecimal stripped = value.stripTrailingZeros();
+                if (stripped.scale() > 1) {
+                    throw new BusinessRuleException(
+                            "El talle de calzado '" + rawSize.trim() + "' admite como máximo un decimal significativo (ej: 7.5, 8.5)");
+                }
+                if (stripped.scale() <= 0) {
+                    return stripped.toBigInteger().toString();
+                } else {
+                    return stripped.toPlainString();
+                }
+            } catch (NumberFormatException ignored) {
+            }
         }
 
-        BigDecimal value;
-        try {
-            value = new BigDecimal(clean);
-        } catch (NumberFormatException e) {
-            throw new BusinessRuleException(
-                    "El talle de calzado '" + rawSize.trim() + "' tiene un formato numérico inválido");
+        // Soporte para talles alfanuméricos de calzado (ej. 6.5Y, 6.5Y (25 CM), 8W, etc.)
+        if (clean.length() > 50) {
+            clean = clean.substring(0, 50).trim();
         }
-
-        if (value.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessRuleException("El talle de calzado debe ser mayor a cero: " + rawSize.trim());
-        }
-
-        BigDecimal stripped = value.stripTrailingZeros();
-        if (stripped.scale() > 1) {
-            throw new BusinessRuleException(
-                    "El talle de calzado '" + rawSize.trim() + "' admite como máximo un decimal significativo (ej: 7.5, 8.5)");
-        }
-
-        if (stripped.scale() <= 0) {
-            return stripped.toBigInteger().toString();
-        } else {
-            return stripped.toPlainString();
-        }
+        return clean;
     }
 
     public static String toSneakerComparisonKey(String size) {
