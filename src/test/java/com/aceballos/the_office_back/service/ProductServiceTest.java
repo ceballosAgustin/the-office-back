@@ -876,5 +876,51 @@ class ProductServiceTest {
         assertEquals(10L, slots.get(0).getProductId());
         assertEquals("https://res.cloudinary.com/demo/image/upload/img1.jpg", slots.get(0).getImageUrl());
     }
-}
 
+    // ---------------------------------------------------------------------
+    // Talles de indumentaria siempre en mayúsculas
+    // ---------------------------------------------------------------------
+
+    @Test
+    void clothingSize_Normalize_ShouldUppercaseButKeepSingleSizeLabels() {
+        assertEquals("XXL", ProductService.normalizeClothingSize(" xxl "));
+        assertEquals("XS", ProductService.normalizeClothingSize("xs"));
+        assertEquals("Único", ProductService.normalizeClothingSize("Único"));
+        assertEquals("One Size", ProductService.normalizeClothingSize("One Size"));
+    }
+
+    @Test
+    void clothingSize_CreateWithLowercaseSizes_ShouldSaveUppercase() {
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Talles")
+                .price(new BigDecimal("1000.00"))
+                .variants(List.of(new VariantDTO(null, "xxs", 1, true), new VariantDTO(null, "xl", 2, true)))
+                .build();
+
+        ProductResponse response = productService.createProduct(request, null);
+
+        assertEquals(List.of("XXS", "XL"), response.getVariants().stream().map(VariantDTO::getSize).toList());
+    }
+
+    @Test
+    void clothingSize_UpdateExistingLowercaseVariantWithHistory_ShouldFixCaseWithoutError() {
+        variantM.setSize("m");
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductRequest request = ProductRequest.builder()
+                .title("Remera Oversize Dunder Mifflin")
+                .price(new BigDecimal("28500.00"))
+                .variants(List.of(new VariantDTO(101L, "m", 5, true), new VariantDTO(102L, "L", 10, true)))
+                .build();
+
+        ProductResponse response = productService.updateProduct(10L, request, null);
+
+        assertEquals("M", variantM.getSize());
+        assertEquals(101L, response.getVariants().get(0).getId());
+        // Solo cambia la capitalización: no consulta historial ni bloquea
+        verifyNoInteractions(orderItemRepository, inquiryRepository);
+    }
+}

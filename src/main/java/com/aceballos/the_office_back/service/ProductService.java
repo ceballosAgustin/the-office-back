@@ -135,7 +135,7 @@ public class ProductService {
                 ProductVariant variant = new ProductVariant();
                 String normalizedSize = isSneakers
                         ? normalizeSneakerSize(vDto.getSize())
-                        : vDto.getSize().trim();
+                        : normalizeClothingSize(vDto.getSize());
                 variant.setSize(normalizedSize);
                 variant.setStock(vDto.getStock() != null ? vDto.getStock() : 0);
                 variant.setIsActive(!Boolean.FALSE.equals(vDto.getIsActive()));
@@ -325,6 +325,29 @@ public class ProductService {
 
     public static boolean isSneakersCategory(Category category) {
         return category != null && "sneakers".equalsIgnoreCase(category.getSlug());
+    }
+
+    /** Etiquetas de talle único que se conservan tal cual (sin pasar a mayúsculas). */
+    private static final Set<String> SINGLE_SIZE_LABELS = Set.of(
+            "unico", "talle unico", "one size", "onesize", "os");
+
+    /**
+     * Normaliza talles de indumentaria/accesorios: recorta espacios y los pasa a mayúsculas
+     * ("xxl" → "XXL", "m" → "M"). Las etiquetas de talle único ("Único", "One Size") se
+     * conservan como fueron escritas.
+     */
+    public static String normalizeClothingSize(String rawSize) {
+        if (rawSize == null) {
+            return "";
+        }
+        String trimmed = rawSize.trim();
+        String key = java.text.Normalizer.normalize(trimmed, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
+        if (SINGLE_SIZE_LABELS.contains(key)) {
+            return trimmed;
+        }
+        return trimmed.toUpperCase(Locale.ROOT);
     }
 
     public static String normalizeSneakerSize(String rawSize) {
@@ -904,10 +927,19 @@ public class ProductService {
                 String incomingRawSize = vDto.getSize() != null ? vDto.getSize().trim() : "";
                 String existingSize = existing.getSize() != null ? existing.getSize().trim() : "";
 
-                if (!existingSize.equalsIgnoreCase(incomingRawSize)) {
+                if (existingSize.equalsIgnoreCase(incomingRawSize)) {
+                    // Mismo talle con distinta capitalización (ej. "xxl" guardado antes de normalizar):
+                    // se corrige a mayúsculas aunque tenga historial, porque no cambia el talle real.
+                    if (!isSneakers) {
+                        String upperSize = normalizeClothingSize(existingSize);
+                        if (!upperSize.equals(existingSize)) {
+                            existing.setSize(upperSize);
+                        }
+                    }
+                } else {
                     String normalizedSize = isSneakers
                             ? normalizeSneakerSize(incomingRawSize)
-                            : incomingRawSize;
+                            : normalizeClothingSize(incomingRawSize);
 
                     if (!existingSize.equalsIgnoreCase(normalizedSize)) {
                         if (hasHistoricalReferences(existing.getId())) {
@@ -925,7 +957,7 @@ public class ProductService {
             } else {
                 String normalizedSize = isSneakers
                         ? normalizeSneakerSize(vDto.getSize())
-                        : vDto.getSize().trim();
+                        : normalizeClothingSize(vDto.getSize());
 
                 ProductVariant newVariant = new ProductVariant();
                 newVariant.setSize(normalizedSize);
