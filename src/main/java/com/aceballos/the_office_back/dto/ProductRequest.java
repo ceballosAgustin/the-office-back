@@ -3,6 +3,7 @@ package com.aceballos.the_office_back.dto;
 import com.aceballos.the_office_back.entity.ProductGender;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -41,6 +42,13 @@ public class ProductRequest {
     private Long categoryId;
     private Long brandId;
     private ProductGender gender;
+
+    /**
+     * Posición en la sección "Recién ingresados" (1..20). Null quita el producto de la sección.
+     */
+    @Min(value = 1, message = "La posición en Recién ingresados debe estar entre 1 y 20")
+    @Max(value = 20, message = "La posición en Recién ingresados debe estar entre 1 y 20")
+    private Integer newInPosition;
 
     @Valid
     private List<VariantDTO> variants;

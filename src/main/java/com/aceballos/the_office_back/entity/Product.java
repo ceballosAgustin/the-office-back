@@ -43,6 +43,13 @@ public class Product {
     @Column(name = "gender", nullable = false, length = 20, columnDefinition = "varchar(20) default 'UNISEX'")
     private ProductGender gender = ProductGender.UNISEX;
 
+    /**
+     * Posición (1..20) del producto en la sección "Recién ingresados" del inicio.
+     * Null indica que el producto no forma parte de la sección. Única por producto.
+     */
+    @Column(name = "new_in_position", unique = true)
+    private Integer newInPosition;
+
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     @ManyToOne(fetch = FetchType.LAZY)

@@ -33,6 +33,8 @@ public class ProductResponse {
 
     private ProductGender gender;
 
+    private Integer newInPosition;
+
     @Builder.Default
     private List<ProductImageResponse> images = new ArrayList<>();
 

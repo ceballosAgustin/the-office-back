@@ -1,5 +1,6 @@
 package com.aceballos.the_office_back.controller;
 
+import com.aceballos.the_office_back.dto.NewInSlotResponse;
 import com.aceballos.the_office_back.dto.ProductResponse;
 import com.aceballos.the_office_back.dto.ReorderProductImagesRequest;
 import com.aceballos.the_office_back.dto.UpdateProductStatusRequest;
@@ -39,6 +40,15 @@ public class ProductAdminController {
             @RequestParam(name = "title", required = false) String title,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(productService.getAdminProducts(isActive, categoryId, title, pageable));
+    }
+
+    /**
+     * Posiciones ocupadas de la sección "Recién ingresados" (1..20), incluyendo productos inactivos.
+     * Ejemplo: GET /api/admin/products/new-in
+     */
+    @GetMapping("/new-in")
+    public ResponseEntity<List<NewInSlotResponse>> getNewInSlots() {
+        return ResponseEntity.ok(productService.getNewInSlots());
     }
 
     /**

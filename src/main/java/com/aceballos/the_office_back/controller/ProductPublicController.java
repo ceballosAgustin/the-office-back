@@ -11,6 +11,8 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/products")
 @RequiredArgsConstructor
@@ -32,6 +34,16 @@ public class ProductPublicController {
             @RequestParam(name = "variantSize", required = false) String variantSize,
             @PageableDefault(size = 12, sort = "id", direction = Sort.Direction.DESC) Pageable pageable) {
         return ResponseEntity.ok(productService.getActiveProducts(categoryId, category, brand, gender, variantSize, pageable));
+    }
+
+    /**
+     * Sección "Recién ingresados" del inicio: productos activos elegidos por el admin,
+     * ordenados por posición (máximo 20).
+     * Ejemplo: GET /api/products/new-in
+     */
+    @GetMapping("/new-in")
+    public ResponseEntity<List<ProductResponse>> getNewInProducts() {
+        return ResponseEntity.ok(productService.getNewInProducts());
     }
 
     /**

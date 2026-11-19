@@ -1,6 +1,7 @@
 package com.aceballos.the_office_back.service;
 
 import com.aceballos.the_office_back.dto.FilterOptionsResponse;
+import com.aceballos.the_office_back.dto.NewInSlotResponse;
 import com.aceballos.the_office_back.dto.ProductImageResponse;
 import com.aceballos.the_office_back.dto.ProductRequest;
 import com.aceballos.the_office_back.dto.ProductResponse;
@@ -12,6 +13,7 @@ import com.aceballos.the_office_back.entity.ProductGender;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
+import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
@@ -53,6 +55,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ProductService {
+
+    /** Cantidad máxima de productos en la sección "Recién ingresados" del inicio. */
+    public static final int MAX_NEW_IN_PRODUCTS = 20;
 
     private final ProductRepository productRepository;
     private final ProductVariantRepository productVariantRepository;
@@ -110,6 +115,7 @@ public class ProductService {
         product.setIsActive(true);
         product.setGender(request.getGender() != null ? request.getGender() : ProductGender.UNISEX);
         product.setCategory(category);
+        applyNewInPosition(product, request.getNewInPosition());
 
         if (request.getBrandId() != null) {
             Brand brand = brandRepository.findById(request.getBrandId())
@@ -572,6 +578,8 @@ public class ProductService {
             product.setGender(request.getGender());
         }
 
+        applyNewInPosition(product, request.getNewInPosition());
+
         if (request.getBrandId() != null) {
             Brand brand = brandRepository.findById(request.getBrandId())
                     .orElseThrow(
@@ -603,6 +611,75 @@ public class ProductService {
             }
             throw ex;
         }
+    }
+
+    /**
+     * Productos activos de la sección "Recién ingresados" ordenados por posición (1 primero).
+     */
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getNewInProducts() {
+        return productRepository.findByNewInPositionIsNotNullAndIsActiveTrueOrderByNewInPositionAsc()
+                .stream()
+                .map(this::mapToPublicResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Posiciones ocupadas de la sección "Recién ingresados" (incluye productos inactivos),
+     * para que el panel administrativo muestre qué lugares están en uso.
+     */
+    @Transactional(readOnly = true)
+    public List<NewInSlotResponse> getNewInSlots() {
+        return productRepository.findByNewInPositionIsNotNullOrderByNewInPositionAsc()
+                .stream()
+                .map(p -> NewInSlotResponse.builder()
+                        .position(p.getNewInPosition())
+                        .productId(p.getId())
+                        .title(p.getTitle())
+                        .isActive(p.getIsActive())
+                        .imageUrl(resolvePrimaryImageUrl(p))
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Asigna (o quita, si es null) la posición del producto en "Recién ingresados".
+     * Las posiciones van de 1 a 20 y son únicas, por lo que la sección nunca supera los 20 productos.
+     */
+    private void applyNewInPosition(Product product, Integer requestedPosition) {
+        if (requestedPosition == null) {
+            product.setNewInPosition(null);
+            return;
+        }
+        if (requestedPosition < 1 || requestedPosition > MAX_NEW_IN_PRODUCTS) {
+            throw new BusinessRuleException(
+                    "La posición en Recién ingresados debe estar entre 1 y " + MAX_NEW_IN_PRODUCTS);
+        }
+        if (requestedPosition.equals(product.getNewInPosition())) {
+            return;
+        }
+        productRepository.findByNewInPosition(requestedPosition)
+                .filter(other -> product.getId() == null || !product.getId().equals(other.getId()))
+                .ifPresent(other -> {
+                    throw new ResourceConflictException("La posición " + requestedPosition
+                            + " de Recién ingresados ya está ocupada por '" + other.getTitle()
+                            + "'. Elegí otra posición o quitá ese producto de la sección.");
+                });
+        product.setNewInPosition(requestedPosition);
+    }
+
+    private String resolvePrimaryImageUrl(Product product) {
+        if (product.getImages() == null || product.getImages().isEmpty()) {
+            return null;
+        }
+        return product.getImages().stream()
+                .filter(img -> Boolean.TRUE.equals(img.getIsPrimary()))
+                .findFirst()
+                .or(() -> product.getImages().stream()
+                        .min(Comparator.comparing(
+                                img -> img.getOrderIndex() != null ? img.getOrderIndex() : Integer.MAX_VALUE)))
+                .map(ProductImage::getImageUrl)
+                .orElse(null);
     }
 
     /**
@@ -1015,6 +1092,7 @@ public class ProductService {
                 .baseStock(calculateActiveStock(product))
                 .isActive(product.getIsActive())
                 .gender(product.getGender() != null ? product.getGender() : ProductGender.UNISEX)
+                .newInPosition(product.getNewInPosition())
                 .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .categorySlug(product.getCategory() != null ? product.getCategory().getSlug() : null)

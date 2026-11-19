@@ -26,6 +26,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     long countByBrandId(Long brandId);
 
+    Optional<Product> findByNewInPosition(Integer newInPosition);
+
+    /**
+     * Productos de la sección "Recién ingresados" (activos e inactivos) ordenados por posición.
+     */
+    @EntityGraph(attributePaths = {"category", "brand"})
+    List<Product> findByNewInPositionIsNotNullOrderByNewInPositionAsc();
+
+    /**
+     * Productos activos de la sección "Recién ingresados" ordenados por posición, para el inicio público.
+     */
+    @EntityGraph(attributePaths = {"category", "brand"})
+    List<Product> findByNewInPositionIsNotNullAndIsActiveTrueOrderByNewInPositionAsc();
+
     @Modifying
     @Transactional
     @Query("UPDATE Product p SET p.gender = com.aceballos.the_office_back.entity.ProductGender.UNISEX WHERE p.gender IS NULL")

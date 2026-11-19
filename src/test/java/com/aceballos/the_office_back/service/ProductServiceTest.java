@@ -11,6 +11,7 @@ import com.aceballos.the_office_back.entity.ProductGender;
 import com.aceballos.the_office_back.entity.ProductImage;
 import com.aceballos.the_office_back.entity.ProductVariant;
 import com.aceballos.the_office_back.exception.BusinessRuleException;
+import com.aceballos.the_office_back.exception.ResourceConflictException;
 import com.aceballos.the_office_back.exception.ResourceNotFoundException;
 import com.aceballos.the_office_back.repository.BrandRepository;
 import com.aceballos.the_office_back.repository.CategoryRepository;
@@ -757,6 +758,123 @@ class ProductServiceTest {
         // Debe ordenar determinísticamente: numéricos 38, 39.5, 40, 41, 42 luego ropa XS, S, M, XL
         List<String> expected = List.of("38", "39.5", "40", "41", "42", "XS", "S", "M", "XL");
         assertEquals(expected, response.getAvailableSizes());
+    }
+
+    // ---------------------------------------------------------------------
+    // Sección "Recién ingresados"
+    // ---------------------------------------------------------------------
+
+    private ProductRequest newInUpdateRequest(Integer position) {
+        return ProductRequest.builder()
+                .title("Remera Oversize Dunder Mifflin")
+                .price(new BigDecimal("28500.00"))
+                .variants(List.of(
+                        new VariantDTO(101L, "M", 5, true),
+                        new VariantDTO(102L, "L", 10, true)
+                ))
+                .newInPosition(position)
+                .build();
+    }
+
+    @Test
+    void newIn_UpdateWithFreePosition_ShouldAssignPosition() {
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.findByNewInPosition(3)).thenReturn(Optional.empty());
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductResponse response = productService.updateProduct(10L, newInUpdateRequest(3), null);
+
+        assertEquals(3, response.getNewInPosition());
+    }
+
+    @Test
+    void newIn_UpdateWithPositionTakenByAnotherProduct_ShouldThrowConflict() {
+        Product other = new Product();
+        other.setId(99L);
+        other.setTitle("Zapatilla Retro");
+        other.setNewInPosition(3);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.findByNewInPosition(3)).thenReturn(Optional.of(other));
+
+        ResourceConflictException ex = assertThrows(ResourceConflictException.class,
+                () -> productService.updateProduct(10L, newInUpdateRequest(3), null));
+
+        assertTrue(ex.getMessage().contains("Zapatilla Retro"));
+        assertNull(existingProduct.getNewInPosition());
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void newIn_UpdateKeepingSamePosition_ShouldNotCheckAvailability() {
+        existingProduct.setNewInPosition(5);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductResponse response = productService.updateProduct(10L, newInUpdateRequest(5), null);
+
+        assertEquals(5, response.getNewInPosition());
+        verify(productRepository, never()).findByNewInPosition(any());
+    }
+
+    @Test
+    void newIn_UpdateWithNullPosition_ShouldRemoveFromSection() {
+        existingProduct.setNewInPosition(5);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProductResponse response = productService.updateProduct(10L, newInUpdateRequest(null), null);
+
+        assertNull(response.getNewInPosition());
+    }
+
+    @Test
+    void newIn_PositionOutOfRange_ShouldFailValidation() {
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+
+        assertThrows(ConstraintViolationException.class,
+                () -> productService.updateProduct(10L, newInUpdateRequest(21), null));
+        assertThrows(ConstraintViolationException.class,
+                () -> productService.updateProduct(10L, newInUpdateRequest(0), null));
+    }
+
+    @Test
+    void newIn_CreateWithFreePosition_ShouldAssignPosition() {
+        when(productRepository.findByNewInPosition(1)).thenReturn(Optional.empty());
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> {
+            Product p = inv.getArgument(0);
+            p.setId(30L);
+            return p;
+        });
+
+        ProductRequest request = ProductRequest.builder()
+                .title("Buzo Nuevo")
+                .price(new BigDecimal("45000.00"))
+                .variants(List.of(new VariantDTO(null, "M", 4, true)))
+                .newInPosition(1)
+                .build();
+
+        ProductResponse response = productService.createProduct(request, null);
+
+        assertEquals(1, response.getNewInPosition());
+    }
+
+    @Test
+    void newIn_PublicListAndAdminSlots_ShouldMapInPositionOrder() {
+        existingProduct.setNewInPosition(2);
+        when(productRepository.findByNewInPositionIsNotNullAndIsActiveTrueOrderByNewInPositionAsc())
+                .thenReturn(List.of(existingProduct));
+        when(productRepository.findByNewInPositionIsNotNullOrderByNewInPositionAsc())
+                .thenReturn(List.of(existingProduct));
+
+        List<ProductResponse> publicList = productService.getNewInProducts();
+        assertEquals(1, publicList.size());
+        assertEquals(2, publicList.get(0).getNewInPosition());
+
+        var slots = productService.getNewInSlots();
+        assertEquals(1, slots.size());
+        assertEquals(2, slots.get(0).getPosition());
+        assertEquals(10L, slots.get(0).getProductId());
+        assertEquals("https://res.cloudinary.com/demo/image/upload/img1.jpg", slots.get(0).getImageUrl());
     }
 }
 
