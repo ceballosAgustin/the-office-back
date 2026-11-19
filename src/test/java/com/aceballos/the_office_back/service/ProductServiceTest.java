@@ -473,6 +473,31 @@ class ProductServiceTest {
     }
 
     @Test
+    void productBrand_UpdateKeepingDeactivatedCurrentBrand_ShouldSucceedButChangingToInactiveBrandShouldFail() {
+        Brand inactiveCurrent = new Brand(2L, "Reebok", "reebok", false);
+        existingProduct.setBrand(inactiveCurrent);
+        Brand otherInactive = new Brand(4L, "Fila", "fila", false);
+        when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));
+        when(brandRepository.findById(2L)).thenReturn(Optional.of(inactiveCurrent));
+        when(brandRepository.findById(4L)).thenReturn(Optional.of(otherInactive));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        List<VariantDTO> variants = List.of(new VariantDTO(101L, "M", 5, true), new VariantDTO(102L, "L", 10, true));
+
+        // Misma marca (desactivada): la edición debe permitirse
+        ProductRequest keepRequest = ProductRequest.builder()
+                .title("Nuevo titulo").price(existingProduct.getPrice()).brandId(2L).variants(variants).build();
+        ProductResponse response = productService.updateProduct(10L, keepRequest, null);
+        assertEquals(2L, response.getBrandId());
+
+        // Cambiar a otra marca desactivada: sigue rechazándose
+        ProductRequest changeRequest = ProductRequest.builder()
+                .title("Nuevo titulo").price(existingProduct.getPrice()).brandId(4L).variants(variants).build();
+        assertThrows(BusinessRuleException.class, () -> productService.updateProduct(10L, changeRequest, null));
+        assertEquals(2L, existingProduct.getBrand().getId());
+    }
+
+    @Test
     void productBrand_UpdateBrandAndRemoveBrand_ShouldPreserveOrClearBrand() {
         Brand adidas = new Brand(3L, "Adidas", "adidas", true);
         when(productRepository.findById(10L)).thenReturn(Optional.of(existingProduct));

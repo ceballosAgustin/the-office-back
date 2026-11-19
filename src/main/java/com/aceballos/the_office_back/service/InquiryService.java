@@ -80,7 +80,18 @@ public class InquiryService {
             if (itemReq.getQuantity() == null || itemReq.getQuantity() < 1) {
                 throw new IllegalArgumentException("La cantidad de cada artículo debe ser mayor o igual a 1");
             }
-            consolidatedQuantities.merge(itemReq.getVariantId(), itemReq.getQuantity(), Integer::sum);
+            // Evita desbordamiento de enteros y cantidades abusivas al consolidar variantes repetidas
+            int consolidated;
+            try {
+                consolidated = Math.addExact(
+                        consolidatedQuantities.getOrDefault(itemReq.getVariantId(), 0), itemReq.getQuantity());
+            } catch (ArithmeticException ex) {
+                throw new BusinessRuleException(OrderService.MAX_QUANTITY_PER_VARIANT_MESSAGE);
+            }
+            if (consolidated > OrderService.MAX_QUANTITY_PER_VARIANT) {
+                throw new BusinessRuleException(OrderService.MAX_QUANTITY_PER_VARIANT_MESSAGE);
+            }
+            consolidatedQuantities.put(itemReq.getVariantId(), consolidated);
         }
 
         String normalizedPhone = validateAndNormalizeWhatsappPhone();

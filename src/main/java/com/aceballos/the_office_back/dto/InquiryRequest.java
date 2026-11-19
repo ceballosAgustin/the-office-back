@@ -22,6 +22,7 @@ public class InquiryRequest {
 
     @Valid
     @NotEmpty(message = "La consulta debe contener al menos un producto")
+    @Size(max = 50, message = "La consulta no puede contener más de 50 artículos")
     @Builder.Default
     private List<InquiryItemRequest> items = new ArrayList<>();
 }

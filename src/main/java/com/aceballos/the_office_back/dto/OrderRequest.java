@@ -3,6 +3,7 @@ package com.aceballos.the_office_back.dto;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,6 +26,7 @@ public class OrderRequest {
 
     @Valid
     @NotEmpty(message = "La orden debe contener al menos un producto")
+    @Size(max = 50, message = "La orden no puede contener más de 50 artículos")
     @Builder.Default
     private List<OrderItemRequest> items = new ArrayList<>();
 }

@@ -299,6 +299,10 @@ public class NavigationService {
         NavSection section = navSectionRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sección de navegación no encontrada con ID: " + id));
 
+        if (BRANDS_SECTION_CODE.equalsIgnoreCase(section.getCode())) {
+            throw new BusinessRuleException("La sección de marcas es obligatoria y no puede eliminarse");
+        }
+
         navSectionRepository.delete(section);
         log.info("Sección de navegación ID={} ('{}') eliminada junto con sus elementos asociados",
                 section.getId(), section.getCode());
@@ -328,6 +332,18 @@ public class NavigationService {
         for (int i = 0; i < ids.size(); i++) {
             NavSection s = map.get(ids.get(i));
             s.setOrderIndex(i);
+        }
+
+        // Las secciones no incluidas en la lista conservan su orden relativo y quedan a continuación,
+        // para que el estado final tenga índices únicos y consecutivos
+        int nextIndex = ids.size();
+        List<NavSection> remaining = existing.stream()
+                .filter(sec -> !uniqueIds.contains(sec.getId()))
+                .sorted(Comparator.comparing((NavSection sec) -> sec.getOrderIndex() != null ? sec.getOrderIndex() : 0)
+                        .thenComparing(NavSection::getId))
+                .toList();
+        for (NavSection sec : remaining) {
+            sec.setOrderIndex(nextIndex++);
         }
         navSectionRepository.saveAll(map.values());
 
@@ -526,14 +542,22 @@ public class NavigationService {
 
         boolean isBrandsSection = BRANDS_SECTION_CODE.equalsIgnoreCase(section.getCode());
         if (isBrandsSection) {
-            Map<Integer, Integer> visibleCountByColumn = new HashMap<>();
+            Map<Long, OrderItemPosition> positionById = positions.stream()
+                    .collect(Collectors.toMap(OrderItemPosition::getId, Function.identity()));
             for (OrderItemPosition pos : positions) {
                 int col = pos.getColumnIndex();
                 if (col != 0 && col != 1) {
                     throw new BusinessRuleException("La sección de marcas solo admite las columnas 0 y 1");
                 }
-                NavItem it = itemMap.get(pos.getId());
+            }
+            // Se valida el estado final: ítems reubicados con su nueva columna e ítems no incluidos
+            // en la lista con su columna actual
+            Map<Integer, Integer> visibleCountByColumn = new HashMap<>();
+            for (NavItem it : sectionItems) {
                 if (Boolean.TRUE.equals(it.getIsVisible()) && it.getTargetType() == NavTargetType.BRAND) {
+                    OrderItemPosition moved = positionById.get(it.getId());
+                    int col = moved != null ? moved.getColumnIndex()
+                            : (it.getColumnIndex() != null ? it.getColumnIndex() : 0);
                     int updatedCount = visibleCountByColumn.merge(col, 1, Integer::sum);
                     if (updatedCount > MAX_VISIBLE_BRANDS_PER_COLUMN) {
                         throw new ResourceConflictException("No se pueden tener más de "

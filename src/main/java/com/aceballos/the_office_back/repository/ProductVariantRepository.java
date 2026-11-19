@@ -16,11 +16,6 @@ import java.util.Optional;
 public interface ProductVariantRepository extends JpaRepository<ProductVariant, Long> {
 
     /**
-     * Permite consultar todas las variantes asociadas a un producto determinado.
-     */
-    List<ProductVariant> findByProductId(Long productId);
-
-    /**
      * Obtiene una variante aplicando bloqueo pesimista de escritura (SELECT ... FOR UPDATE)
      * para evitar condiciones de carrera durante el descuento/restauración de stock.
      */

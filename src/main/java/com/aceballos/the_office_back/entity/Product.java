@@ -43,10 +43,14 @@ public class Product {
     @Column(name = "gender", nullable = false, length = 20, columnDefinition = "varchar(20) default 'UNISEX'")
     private ProductGender gender = ProductGender.UNISEX;
 
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
 
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     private Brand brand;

@@ -48,6 +48,8 @@ public class Order {
      * Si compra como invitado, este campo permanece null.
      * Si compra logueado, se asocia a su cuenta.
      */
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;

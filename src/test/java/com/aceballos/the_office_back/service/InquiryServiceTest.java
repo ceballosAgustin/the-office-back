@@ -437,6 +437,48 @@ class InquiryServiceTest {
         }
 
         @Test
+        void createInquiry_WhenDuplicateVariantLinesExceedQuantityCap_ShouldRejectWithBusinessRuleException() {
+                InquiryRequest request = InquiryRequest.builder()
+                                .contactName("Juan")
+                                .items(List.of(new InquiryItemRequest(101L, 60), new InquiryItemRequest(101L, 40)))
+                                .build();
+
+                assertThrows(BusinessRuleException.class, () -> inquiryService.createInquiry(request));
+                verify(inquiryRepository, never()).save(any());
+        }
+
+        @Test
+        void createInquiry_WhenDuplicateVariantLinesOverflowInteger_ShouldRejectWithBusinessRuleException() {
+                InquiryRequest request = InquiryRequest.builder()
+                                .contactName("Juan")
+                                .items(List.of(new InquiryItemRequest(101L, Integer.MAX_VALUE),
+                                                new InquiryItemRequest(101L, 2)))
+                                .build();
+
+                assertThrows(BusinessRuleException.class, () -> inquiryService.createInquiry(request));
+                verify(inquiryRepository, never()).save(any());
+                assertEquals(5, variantM.getStock());
+        }
+
+        @Test
+        void createInquiry_WhenDuplicateVariantLinesWithinCap_ShouldStillConsolidateIntoSingleItem() {
+                when(productVariantRepository.findById(101L)).thenReturn(Optional.of(variantM));
+                when(inquiryRepository.existsByInquiryNumber(anyString())).thenReturn(false);
+                when(inquiryRepository.save(any(Inquiry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+                InquiryRequest request = InquiryRequest.builder()
+                                .contactName("Juan")
+                                .items(List.of(new InquiryItemRequest(101L, 2), new InquiryItemRequest(101L, 3)))
+                                .build();
+
+                InquiryResponse response = inquiryService.createInquiry(request);
+
+                assertEquals(1, response.getItems().size());
+                assertEquals(5, response.getItems().get(0).getQuantity());
+                assertEquals(0, new BigDecimal("142500.00").compareTo(response.getTotalAmount()));
+        }
+
+        @Test
         void argentinaDatePrefix_ShouldUseBuenosAiresCalendarDateRegardlessOfJvmDefaultTimeZone() {
                 TimeZone originalTz = TimeZone.getDefault();
                 try {

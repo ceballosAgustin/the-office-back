@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Data
 @NoArgsConstructor
@@ -19,6 +20,7 @@ public class User {
     @Column(nullable = false, unique = true, length = 100)
     private String username;
 
+    @ToString.Exclude
     @Column(nullable = false)
     private String password;
 

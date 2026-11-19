@@ -87,6 +87,24 @@ class BrandControllerTest {
 
     @Test
     @WithMockUser(roles = "USER")
+    void adminEndpoints_WithUserRole_ShouldReturnErrorResponseJsonBody() throws Exception {
+        mockMvc.perform(get("/api/admin/brands"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.message").value("No tienes permisos suficientes para realizar esta operación"));
+    }
+
+    @Test
+    void adminEndpoints_WithoutAuthentication_ShouldReturnJsonBody() throws Exception {
+        mockMvc.perform(get("/api/admin/brands"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    @WithMockUser(roles = "USER")
     void adminEndpoints_WithUserRole_ShouldReturn403Forbidden() throws Exception {
         mockMvc.perform(get("/api/admin/brands"))
                 .andExpect(status().isForbidden());

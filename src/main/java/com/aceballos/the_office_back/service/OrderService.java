@@ -49,6 +49,11 @@ public class OrderService {
     public static final ZoneId ARGENTINA_ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
     private static final DateTimeFormatter ARGENTINA_DATE_PREFIX_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
 
+    /** Cantidad máxima permitida por variante en una misma solicitud. */
+    public static final int MAX_QUANTITY_PER_VARIANT = 99;
+    public static final String MAX_QUANTITY_PER_VARIANT_MESSAGE =
+            "La cantidad máxima por artículo es " + MAX_QUANTITY_PER_VARIANT;
+
     private final OrderRepository orderRepository;
     private final ProductVariantRepository productVariantRepository;
 
@@ -66,6 +71,26 @@ public class OrderService {
     public OrderResponse createOrder(OrderRequest request) {
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new IllegalArgumentException("La orden debe contener al menos un producto");
+        }
+
+        // Validar cantidades y acotar el total consolidado por variante (sin desbordamiento)
+        Map<Long, Integer> consolidatedQuantities = new HashMap<>();
+        for (OrderItemRequest itemReq : request.getItems()) {
+            if (itemReq == null || itemReq.getVariantId() == null) {
+                throw new IllegalArgumentException("El ID de la variante es obligatorio");
+            }
+            requirePositiveQuantity(itemReq.getQuantity());
+            int consolidated;
+            try {
+                consolidated = Math.addExact(
+                        consolidatedQuantities.getOrDefault(itemReq.getVariantId(), 0), itemReq.getQuantity());
+            } catch (ArithmeticException ex) {
+                throw new BusinessRuleException(MAX_QUANTITY_PER_VARIANT_MESSAGE);
+            }
+            if (consolidated > MAX_QUANTITY_PER_VARIANT) {
+                throw new BusinessRuleException(MAX_QUANTITY_PER_VARIANT_MESSAGE);
+            }
+            consolidatedQuantities.put(itemReq.getVariantId(), consolidated);
         }
 
         Order order = new Order();
@@ -163,6 +188,10 @@ public class OrderService {
             throw new BusinessRuleException("La consulta no contiene artículos para convertir en pedido");
         }
 
+        for (InquiryItem inquiryItem : inquiry.getItems()) {
+            requirePositiveQuantity(inquiryItem.getQuantity());
+        }
+
         // Bloquear variantes en orden ascendente de ID para evitar deadlocks en
         // confirmaciones concurrentes
         List<Long> sortedVariantIds = inquiry.getItems().stream()
@@ -258,7 +287,9 @@ public class OrderService {
      */
     @Transactional
     public OrderResponse updateOrderStatus(Long orderId, OrderStatus newStatus) {
-        Order order = orderRepository.findById(orderId)
+        // Bloqueo pesimista de la orden: el chequeo de estado y el ajuste de stock
+        // ocurren bajo el mismo lock, evitando restaurar/descontar stock dos veces
+        Order order = orderRepository.findByIdWithLock(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Orden no encontrada con ID: " + orderId));
 
         OrderStatus currentStatus = order.getStatus();
@@ -270,7 +301,7 @@ public class OrderService {
         // Si se cancela una orden que estaba activa, se restaura el stock de cada
         // variante con bloqueo pesimista
         if (newStatus == OrderStatus.CANCELLED && currentStatus != OrderStatus.CANCELLED) {
-            for (OrderItem item : order.getItems()) {
+            for (OrderItem item : itemsSortedByVariantId(order)) {
                 ProductVariant variant = productVariantRepository.findByIdWithLock(item.getProductVariant().getId())
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "Variante no encontrada con ID: " + item.getProductVariant().getId()));
@@ -287,7 +318,7 @@ public class OrderService {
         // nuevamente con bloqueo pesimista
         if (currentStatus == OrderStatus.CANCELLED
                 && (newStatus == OrderStatus.PENDING || newStatus == OrderStatus.COMPLETED)) {
-            for (OrderItem item : order.getItems()) {
+            for (OrderItem item : itemsSortedByVariantId(order)) {
                 ProductVariant variant = productVariantRepository.findByIdWithLock(item.getProductVariant().getId())
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "Variante no encontrada con ID: " + item.getProductVariant().getId()));
@@ -296,6 +327,7 @@ public class OrderService {
                     throw new BusinessRuleException(
                             "No es posible reactivar la orden: El producto o variante no se encuentra activo");
                 }
+                requirePositiveQuantity(item.getQuantity());
                 if (variant.getStock() < item.getQuantity()) {
                     throw new BusinessRuleException(
                             "No es posible reactivar la orden: Stock insuficiente en " +
@@ -355,6 +387,22 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Orden no encontrada con número: " + orderNumber));
         return mapToResponse(order);
+    }
+
+    /**
+     * Devuelve los ítems de la orden ordenados por ID de variante ascendente, para
+     * adquirir los bloqueos pesimistas siempre en el mismo orden y evitar deadlocks.
+     */
+    private static List<OrderItem> itemsSortedByVariantId(Order order) {
+        return order.getItems().stream()
+                .sorted(Comparator.comparing(item -> item.getProductVariant().getId()))
+                .toList();
+    }
+
+    private static void requirePositiveQuantity(Integer quantity) {
+        if (quantity == null || quantity < 1) {
+            throw new BusinessRuleException("La cantidad de cada artículo debe ser mayor o igual a 1");
+        }
     }
 
     static String formatArgentinaDatePrefix(Instant instant) {

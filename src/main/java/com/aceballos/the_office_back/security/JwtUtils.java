@@ -4,6 +4,7 @@ import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.security.SecurityException;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -26,14 +27,33 @@ public class JwtUtils {
     @Value("${app.jwt.expiration-ms}")
     private long jwtExpirationMs;
 
-    private SecretKey getSigningKey() {
+    /** Mínimo de bytes de la clave HMAC-SHA256 (256 bits). */
+    private static final int MIN_KEY_BYTES = 32;
+
+    private SecretKey signingKey;
+
+    /**
+     * Construye la clave de firma una sola vez al iniciar. Mantiene la decodificación
+     * original (Base64 y, si falla, UTF-8) para que los tokens ya emitidos sigan siendo válidos.
+     * Falla de inmediato si la clave es demasiado corta.
+     */
+    @PostConstruct
+    void initSigningKey() {
         byte[] keyBytes;
         try {
             keyBytes = Decoders.BASE64.decode(jwtSecret);
         } catch (IllegalArgumentException e) {
             keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         }
-        return Keys.hmacShaKeyFor(keyBytes);
+        if (keyBytes.length < MIN_KEY_BYTES) {
+            throw new IllegalStateException("app.jwt.secret (JWT_SECRET) es demasiado corta: se requieren al menos "
+                    + MIN_KEY_BYTES + " bytes (256 bits) para HS256 y se obtuvieron " + keyBytes.length);
+        }
+        this.signingKey = Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    private SecretKey getSigningKey() {
+        return signingKey;
     }
 
     public String generateJwtToken(Authentication authentication) {
@@ -71,15 +91,15 @@ public class JwtUtils {
                     .parseSignedClaims(authToken);
             return true;
         } catch (SecurityException e) {
-            log.error("Firma JWT inválida: {}", e.getMessage());
+            log.warn("Firma JWT inválida: {}", e.getMessage());
         } catch (MalformedJwtException e) {
-            log.error("Token JWT malformado: {}", e.getMessage());
+            log.debug("Token JWT malformado: {}", e.getMessage());
         } catch (ExpiredJwtException e) {
-            log.error("Token JWT expirado: {}", e.getMessage());
+            log.debug("Token JWT expirado: {}", e.getMessage());
         } catch (UnsupportedJwtException e) {
-            log.error("Token JWT no soportado: {}", e.getMessage());
+            log.debug("Token JWT no soportado: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
-            log.error("La cadena de claims de JWT está vacía: {}", e.getMessage());
+            log.debug("La cadena de claims de JWT está vacía: {}", e.getMessage());
         }
         return false;
     }

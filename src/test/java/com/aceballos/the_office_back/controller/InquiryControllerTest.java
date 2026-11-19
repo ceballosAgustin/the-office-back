@@ -31,6 +31,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -174,6 +175,25 @@ class InquiryControllerTest {
                                 .andExpect(status().isBadRequest())
                                 .andExpect(jsonPath("$.status").value(400))
                                 .andExpect(jsonPath("$.fieldErrors['items[0].quantity']").exists());
+
+                String overCapQuantityPayload = """
+                                {
+                                  "contactName": "Juan",
+                                  "items": [
+                                    {
+                                      "variantId": 101,
+                                      "quantity": 100
+                                    }
+                                  ]
+                                }
+                                """;
+
+                mockMvc.perform(post("/api/inquiries")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(overCapQuantityPayload))
+                                .andExpect(status().isBadRequest())
+                                .andExpect(jsonPath("$.status").value(400))
+                                .andExpect(jsonPath("$.fieldErrors['items[0].quantity']").exists());
         }
 
         @Test
@@ -195,7 +215,7 @@ class InquiryControllerTest {
         }
 
         @Test
-        void getOrderByOrderNumber_ShouldRemainPublic() throws Exception {
+        void getOrderByOrderNumber_ShouldRequireAdmin_Anonymous401_User403_Admin200() throws Exception {
                 OrderResponse orderResponse = OrderResponse.builder()
                                 .id(45L)
                                 .orderNumber("ORD-261019-999999")
@@ -206,6 +226,14 @@ class InquiryControllerTest {
                 when(orderService.getOrderByOrderNumber("ORD-261019-999999")).thenReturn(orderResponse);
 
                 mockMvc.perform(get("/api/orders/ORD-261019-999999"))
+                                .andExpect(status().isUnauthorized());
+
+                mockMvc.perform(get("/api/orders/ORD-261019-999999")
+                                .with(user("cliente").roles("USER")))
+                                .andExpect(status().isForbidden());
+
+                mockMvc.perform(get("/api/orders/ORD-261019-999999")
+                                .with(user("admin").roles("ADMIN")))
                                 .andExpect(status().isOk())
                                 .andExpect(jsonPath("$.orderNumber").value("ORD-261019-999999"));
         }

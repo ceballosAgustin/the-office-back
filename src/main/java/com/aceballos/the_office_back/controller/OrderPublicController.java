@@ -30,10 +30,12 @@ public class OrderPublicController {
     }
 
     /**
-     * Permite consultar públicamente el estado de una orden por su número único de
-     * pedido (ej. ORD-261008-AB12CD).
+     * Permite a los administradores consultar una orden por su número único de
+     * pedido (ej. ORD-261008-AB12CD). Contiene datos personales del cliente,
+     * por lo que ya no es público.
      */
     @GetMapping("/{orderNumber}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<OrderResponse> getOrderByOrderNumber(@PathVariable String orderNumber) {
         return ResponseEntity.ok(orderService.getOrderByOrderNumber(orderNumber));
     }

@@ -37,6 +37,9 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
 
+    /** Serializa la creación del primer administrador dentro de esta instancia. */
+    private static final Object SETUP_ADMIN_LOCK = new Object();
+
     @Value("${app.auth.admin-setup-token:}")
     private String adminSetupToken;
 
@@ -102,9 +105,20 @@ public class AuthService {
      * One-Time Setup: crea el primer administrador solo si no existe ninguno aún
      * y si se proporciona el token de inicialización X-Admin-Setup-Token válido.
      * Una vez creado el primer ADMIN, este endpoint queda permanentemente deshabilitado.
+     * <p>
+     * Concurrencia: la verificación "no existe ningún ADMIN" y la creación se ejecutan bajo un lock
+     * de JVM (aplicación de una sola instancia). Por eso el método NO es {@code @Transactional}: con una
+     * transacción envolvente el lock se liberaría antes del commit y otra petición podría no ver aún
+     * al administrador recién creado. Aquí cada operación del repositorio confirma su propia transacción
+     * antes de liberar el lock.
      */
-    @Transactional
     public RegisterResponse setupFirstAdmin(RegisterRequest registerRequest, String setupToken) {
+        synchronized (SETUP_ADMIN_LOCK) {
+            return doSetupFirstAdmin(registerRequest, setupToken);
+        }
+    }
+
+    private RegisterResponse doSetupFirstAdmin(RegisterRequest registerRequest, String setupToken) {
         long adminCount = userRepository.countByRole(Role.ADMIN);
         if (adminCount > 0) {
             throw new BusinessRuleException(
@@ -147,10 +161,6 @@ public class AuthService {
                 .username(admin.getUsername())
                 .role(admin.getRole().name())
                 .build();
-    }
-
-    public RegisterResponse setupFirstAdmin(RegisterRequest registerRequest) {
-        return setupFirstAdmin(registerRequest, null);
     }
 
     /**

@@ -157,15 +157,6 @@ public class ProductService {
     }
 
     /**
-     * Lista productos activos paginados para el catálogo público (compatibilidad
-     * hacia atrás).
-     */
-    @Transactional(readOnly = true)
-    public Page<ProductResponse> getActiveProducts(Long categoryId, Pageable pageable) {
-        return getActiveProducts(categoryId, null, null, null, null, pageable);
-    }
-
-    /**
      * Lista productos activos paginados con filtro opcional por categoría y marca
      * (compatibilidad hacia atrás).
      */
@@ -186,15 +177,6 @@ public class ProductService {
             String variantSize,
             Pageable pageable) {
         return searchActiveProducts(null, categoryId, categorySlug, brandSlug, gender, variantSize, pageable);
-    }
-
-    /**
-     * Busca productos activos por título para el catálogo público (compatibilidad
-     * hacia atrás).
-     */
-    @Transactional(readOnly = true)
-    public Page<ProductResponse> searchActiveProducts(String title, Long categoryId, Pageable pageable) {
-        return searchActiveProducts(title, categoryId, null, null, null, null, pageable);
     }
 
     /**
@@ -514,14 +496,6 @@ public class ProductService {
         return sizes;
     }
 
-    private static Double tryParseDouble(String str) {
-        try {
-            return Double.parseDouble(str);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     /**
      * Obtiene el detalle público de un producto activo por ID.
      * Rechaza productos desactivados y filtra variantes inactivas.
@@ -602,7 +576,10 @@ public class ProductService {
             Brand brand = brandRepository.findById(request.getBrandId())
                     .orElseThrow(
                             () -> new ResourceNotFoundException("Marca no encontrada con ID: " + request.getBrandId()));
-            if (!Boolean.TRUE.equals(brand.getIsActive())) {
+            // Se permite conservar la marca actual aunque esté desactivada; solo se exige activa al cambiarla
+            boolean keepsCurrentBrand = product.getBrand() != null
+                    && request.getBrandId().equals(product.getBrand().getId());
+            if (!keepsCurrentBrand && !Boolean.TRUE.equals(brand.getIsActive())) {
                 throw new BusinessRuleException("La marca '" + brand.getName() + "' no se encuentra activa");
             }
             product.setBrand(brand);
@@ -812,10 +789,6 @@ public class ProductService {
         }
     }
 
-    private void validateProductRequest(ProductRequest request) {
-        validateProductRequest(request, false);
-    }
-
     private void reconcileVariants(Product product, List<VariantDTO> incomingVariants, boolean isSneakers) {
         if (incomingVariants == null) {
             return;
@@ -910,10 +883,6 @@ public class ProductService {
         }
     }
 
-    private void reconcileVariants(Product product, List<VariantDTO> incomingVariants) {
-        reconcileVariants(product, incomingVariants, isSneakersCategory(product.getCategory()));
-    }
-
     private boolean hasHistoricalReferences(Long variantId) {
         if (variantId == null) {
             return false;
@@ -1006,10 +975,6 @@ public class ProductService {
     }
 
     public ProductResponse mapToAdminResponse(Product product) {
-        return mapToResponse(product, true);
-    }
-
-    public ProductResponse mapToResponse(Product product) {
         return mapToResponse(product, true);
     }
 

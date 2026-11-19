@@ -1,5 +1,6 @@
 package com.aceballos.the_office_back.service;
 
+import com.aceballos.the_office_back.exception.BusinessRuleException;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +11,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -22,12 +25,11 @@ public class CloudinaryService {
     @Value("${cloudinary.folder:the-office/products}")
     private String cloudinaryFolder = "the-office/products";
 
-    public record CloudinaryUploadResult(String imageUrl, String publicId) {}
+    /** Tipos de contenido de imagen aceptados para subir a Cloudinary. */
+    static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+            "image/jpeg", "image/png", "image/webp", "image/avif", "image/gif");
 
-    public String uploadImage(MultipartFile file) {
-        CloudinaryUploadResult result = uploadImageWithDetails(file);
-        return result != null ? result.imageUrl() : null;
-    }
+    public record CloudinaryUploadResult(String imageUrl, String publicId) {}
 
     @SuppressWarnings("unchecked")
     public CloudinaryUploadResult uploadImageWithDetails(MultipartFile file) {
@@ -35,13 +37,15 @@ public class CloudinaryService {
             return null;
         }
 
+        validateImageContentType(file);
+
         try {
             String folder = StringUtils.hasText(cloudinaryFolder) ? cloudinaryFolder.trim() : "the-office/products";
             Map<String, Object> uploadResult = cloudinary.uploader().upload(
                     file.getBytes(),
                     ObjectUtils.asMap(
                             "folder", folder,
-                            "resource_type", "auto"
+                            "resource_type", "image"
                     )
             );
 
@@ -51,6 +55,15 @@ public class CloudinaryService {
         } catch (IOException e) {
             log.error("Error al subir archivo a Cloudinary: {}", e.getMessage());
             throw new RuntimeException("Error al procesar y subir la imagen del producto", e);
+        }
+    }
+
+    private static void validateImageContentType(MultipartFile file) {
+        String contentType = file.getContentType();
+        String normalized = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
+        if (!ALLOWED_CONTENT_TYPES.contains(normalized)) {
+            throw new BusinessRuleException(
+                    "Formato de imagen no permitido. Los formatos aceptados son JPEG, PNG, WebP, AVIF y GIF");
         }
     }
 

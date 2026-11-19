@@ -816,5 +816,74 @@ class NavigationServiceTest {
         assertEquals("Item Oculto", adminNav.get(0).getItems().get(0).getLabel());
         assertFalse(adminNav.get(0).getItems().get(0).getIsVisible());
     }
-}
 
+    @Test
+    @DisplayName("P11. No se puede eliminar la sección 'brands'")
+    void deleteSection_BrandsSection_ShouldBeRejected() {
+        NavSection brands = NavSection.builder().id(1L).code("brands").build();
+        when(navSectionRepository.findById(1L)).thenReturn(Optional.of(brands));
+
+        assertThrows(BusinessRuleException.class, () -> navigationService.deleteSection(1L));
+        verify(navSectionRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("P11. Reordenar secciones con lista parcial deja las restantes a continuación sin índices repetidos")
+    void reorderSections_PartialList_ShouldAppendRemainingSectionsInRelativeOrder() {
+        NavSection a = NavSection.builder().id(1L).code("a").orderIndex(0).build();
+        NavSection b = NavSection.builder().id(2L).code("b").orderIndex(1).build();
+        NavSection c = NavSection.builder().id(3L).code("c").orderIndex(2).build();
+        NavSection d = NavSection.builder().id(4L).code("d").orderIndex(3).build();
+        when(navSectionRepository.findAll()).thenReturn(List.of(a, b, c, d));
+        when(navSectionRepository.findAllSectionsWithItems()).thenReturn(List.of());
+
+        navigationService.reorderSections(new ReorderSectionsRequest(List.of(4L, 2L)));
+
+        assertEquals(0, d.getOrderIndex());
+        assertEquals(1, b.getOrderIndex());
+        assertEquals(2, a.getOrderIndex());
+        assertEquals(3, c.getOrderIndex());
+    }
+
+    private NavItem brandItem(long id, NavSection section, int column, boolean visible) {
+        return NavItem.builder().id(id).section(section).targetType(NavTargetType.BRAND)
+                .columnIndex(column).orderIndex((int) id).isVisible(visible).build();
+    }
+
+    @Test
+    @DisplayName("P11. Reordenar ítems de marcas valida el estado final incluyendo ítems no enviados")
+    void reorderItems_BrandsSection_ShouldValidateFinalStateIncludingUnlistedItems() {
+        NavSection brands = NavSection.builder().id(1L).code("brands").build();
+        List<NavItem> items = new ArrayList<>(List.of(
+                brandItem(1, brands, 0, true), brandItem(2, brands, 0, true),
+                brandItem(3, brands, 0, true), brandItem(4, brands, 0, true),
+                brandItem(5, brands, 1, true)));
+        when(navSectionRepository.findById(1L)).thenReturn(Optional.of(brands));
+        when(navItemRepository.findBySectionIdOrderByColumnIndexAscOrderIndexAsc(1L)).thenReturn(items);
+
+        // Mover solo el ítem 5 a la columna 0, que ya tiene 4 marcas visibles no enviadas -> 5 en la columna
+        ReorderItemsRequest request = new ReorderItemsRequest(List.of(new OrderItemPosition(5L, 0, 9)));
+
+        assertThrows(ResourceConflictException.class, () -> navigationService.reorderItems(1L, request));
+        verify(navItemRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("P11. Reordenar ítems de marcas permite mover un ítem fuera de una columna llena")
+    void reorderItems_BrandsSection_ShouldAllowSwapWhenFinalStateIsWithinLimits() {
+        NavSection brands = NavSection.builder().id(1L).code("brands").build();
+        NavItem i1 = brandItem(1, brands, 0, true);
+        NavItem i5 = brandItem(5, brands, 1, true);
+        List<NavItem> items = new ArrayList<>(List.of(i1, brandItem(2, brands, 0, true),
+                brandItem(3, brands, 0, true), brandItem(4, brands, 0, true), i5));
+        when(navSectionRepository.findById(1L)).thenReturn(Optional.of(brands));
+        when(navItemRepository.findBySectionIdOrderByColumnIndexAscOrderIndexAsc(1L)).thenReturn(items);
+
+        ReorderItemsRequest request = new ReorderItemsRequest(List.of(
+                new OrderItemPosition(1L, 1, 0), new OrderItemPosition(5L, 0, 0)));
+
+        assertDoesNotThrow(() -> navigationService.reorderItems(1L, request));
+        assertEquals(1, i1.getColumnIndex());
+        assertEquals(0, i5.getColumnIndex());
+    }
+}

@@ -16,8 +16,6 @@ import java.util.Optional;
 @Repository
 public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
 
-    Optional<Inquiry> findByInquiryNumber(String inquiryNumber);
-
     boolean existsByInquiryNumber(String inquiryNumber);
 
     Page<Inquiry> findByStatus(InquiryStatus status, Pageable pageable);

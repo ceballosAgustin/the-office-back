@@ -24,10 +24,6 @@ public interface NavItemRepository extends JpaRepository<NavItem, Long> {
 
     boolean existsBySectionIdAndCategoryIdAndIdNot(Long sectionId, Long categoryId, Long id);
 
-    long countBySectionIdAndIsVisibleTrue(Long sectionId);
-
-    long countBySectionIdAndColumnIndexAndIsVisibleTrue(Long sectionId, Integer columnIndex);
-
     @Query("SELECT COUNT(i) FROM NavItem i WHERE i.section.id = :sectionId AND i.targetType = com.aceballos.the_office_back.entity.NavTargetType.BRAND AND i.isVisible = true")
     long countVisibleBrandsBySectionId(@Param("sectionId") Long sectionId);
 

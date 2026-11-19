@@ -3,16 +3,24 @@ package com.aceballos.the_office_back.exception;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -92,7 +100,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleValidationExceptions(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new HashMap<>();
         ex.getBindingResult().getAllErrors().forEach(error -> {
-            String fieldName = ((FieldError) error).getField();
+            // Los errores a nivel de objeto (no de campo) se informan bajo el nombre del objeto
+            String fieldName = error instanceof FieldError fieldError ? fieldError.getField() : error.getObjectName();
             String errorMessage = error.getDefaultMessage();
             errors.put(fieldName, errorMessage);
         });
@@ -142,6 +151,61 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
+
+    @ExceptionHandler({ MissingServletRequestParameterException.class, MissingServletRequestPartException.class })
+    public ResponseEntity<ErrorResponse> handleMissingRequestData(Exception ex) {
+        log.warn("Falta un parámetro o parte obligatoria de la petición: {}", ex.getMessage());
+        return buildError(HttpStatus.BAD_REQUEST, "Falta un parámetro o archivo obligatorio en la petición");
+    }
+
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidSortProperty(PropertyReferenceException ex) {
+        log.warn("Propiedad de ordenamiento inválida: {}", ex.getMessage());
+        return buildError(HttpStatus.BAD_REQUEST, "El criterio de ordenamiento indicado no es válido");
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        log.warn("Método HTTP no soportado: {}", ex.getMessage());
+        ResponseEntity<ErrorResponse> response = buildError(HttpStatus.METHOD_NOT_ALLOWED,
+                "El método HTTP utilizado no está permitido para este recurso");
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).headers(ex.getHeaders()).body(response.getBody());
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex) {
+        log.warn("Tipo de contenido no soportado: {}", ex.getMessage());
+        return buildError(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "El tipo de contenido enviado no es soportado");
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
+        log.warn("Recurso no encontrado: {}", ex.getMessage());
+        return buildError(HttpStatus.NOT_FOUND, "El recurso solicitado no existe");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        log.warn("Tamaño máximo de subida excedido: {}", ex.getMessage());
+        return buildError(HttpStatus.PAYLOAD_TOO_LARGE, "El archivo enviado supera el tamaño máximo permitido");
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Violación de integridad de datos: {}", ex.getMostSpecificCause().getMessage());
+        return buildError(HttpStatus.CONFLICT,
+                "La operación no pudo completarse porque entra en conflicto con datos existentes");
+    }
+
+    private ResponseEntity<ErrorResponse> buildError(HttpStatus status, String message) {
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .timestamp(Instant.now().truncatedTo(ChronoUnit.MICROS))
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(message)
+                .build();
+        return ResponseEntity.status(status).body(errorResponse);
     }
 
     @ExceptionHandler(Exception.class)
